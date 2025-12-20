@@ -19,11 +19,37 @@ import {
 } from '@mother-harness/shared';
 import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
+import { Tier2Memory } from './memory/tier2-summaries.js';
+import { Tier3Memory } from './memory/tier3-longterm.js';
+
+/** Agent dispatch result */
+interface AgentResult {
+    success: boolean;
+    outputs: Record<string, unknown>;
+    explanation?: string;
+    tokens_used?: number;
+    duration_ms?: number;
+}
+
+/** Agent executor interface */
+type AgentExecutor = (inputs: string, context: Record<string, unknown>) => Promise<AgentResult>;
+
+/** Registered agent executors */
+const agentExecutors: Map<AgentType, AgentExecutor> = new Map();
+
+/**
+ * Register an agent executor
+ */
+export function registerAgentExecutor(agentType: AgentType, executor: AgentExecutor): void {
+    agentExecutors.set(agentType, executor);
+}
 
 export class Orchestrator {
     private redis = getRedisJSON();
     private planner = new TaskPlanner();
     private tier1 = new Tier1Memory();
+    private tier2 = new Tier2Memory();
+    private tier3 = new Tier3Memory();
 
     /**
      * Create a new task from user query
@@ -41,10 +67,19 @@ export class Orchestrator {
         // Create task
         const task = createTask(taskId, actualProjectId, userId, query);
 
-        // Generate execution plan
+        // Add user message to tier 1 memory
+        await this.tier1.addMessage(taskId, 'user', query);
+
+        // Get context from memory for planning
+        const recentContext = await this.tier1.getContextString(taskId);
+        const summaryContext = await this.tier2.getContextString(actualProjectId, 3);
+        const longTermContext = await this.tier3.getContextString(actualProjectId, query);
+
+        // Generate execution plan with context
         const plan = await this.planner.createPlan(query, {
             project_id: actualProjectId,
             user_id: userId,
+            context: `${recentContext}\n\n${summaryContext}\n\n${longTermContext}`,
         });
 
         task.todo_list = plan.steps;
@@ -64,7 +99,7 @@ export class Orchestrator {
      * Get task by ID
      */
     async getTask(taskId: string): Promise<Task | null> {
-        const task = await this.redis.get<Task>(`task:${taskId}`);
+        const task = await this.redis.get(`task:${taskId}`) as Task | null;
         if (!task) return null;
 
         // Validate schema
@@ -78,7 +113,7 @@ export class Orchestrator {
     }
 
     /**
-     * Execute a task (runs in background)
+     * Execute a task
      */
     async executeTask(taskId: string): Promise<void> {
         const task = await this.getTask(taskId);
@@ -86,6 +121,9 @@ export class Orchestrator {
 
         // Update status to executing
         await this.updateTaskStatus(taskId, 'executing');
+
+        const agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number }> = [];
+        let totalTokens = 0;
 
         // Execute steps in order
         for (const step of task.todo_list) {
@@ -101,12 +139,24 @@ export class Orchestrator {
                 if (step.require_approval) {
                     await this.createApprovalRequest(task, step);
                     await this.updateTaskStatus(taskId, 'approval_needed');
-                    // Wait for approval (this would be handled by a separate mechanism)
                     return;
                 }
 
-                // Execute the step (placeholder - would dispatch to agents)
+                // Execute the step
                 const result = await this.executeStep(task, step);
+
+                // Track agent invocation
+                agentsInvoked.push({
+                    agent: step.agent,
+                    step_id: step.id,
+                    tokens: result.tokens_used ?? 0,
+                });
+                totalTokens += result.tokens_used ?? 0;
+
+                // Add assistant response to tier 1 memory
+                if (result.explanation) {
+                    await this.tier1.addMessage(taskId, 'assistant', result.explanation);
+                }
 
                 // Update step with result
                 await this.updateStepResult(taskId, step.id, result);
@@ -120,8 +170,99 @@ export class Orchestrator {
             }
         }
 
-        // All steps completed
-        await this.finalizeTask(taskId);
+        // Update token usage
+        await this.redis.set(`task:${taskId}`, '$.tokens_used', totalTokens);
+
+        // All steps completed - finalize with memory updates
+        await this.finalizeTask(taskId, agentsInvoked);
+    }
+
+    /**
+     * Execute a single step by dispatching to the appropriate agent
+     */
+    private async executeStep(task: Task, step: TodoItem): Promise<AgentResult> {
+        const executor = agentExecutors.get(step.agent);
+
+        if (!executor) {
+            console.warn(`No executor registered for agent: ${step.agent}`);
+            // Return placeholder result
+            return {
+                success: true,
+                outputs: {
+                    agent: step.agent,
+                    description: step.description,
+                    executed_at: new Date().toISOString(),
+                    note: 'No agent executor registered - using placeholder',
+                },
+                explanation: `Executed step: ${step.description}`,
+                tokens_used: 0,
+                duration_ms: 0,
+            };
+        }
+
+        // Build context for agent
+        const recentContext = await this.tier1.getContextString(task.id);
+        const longTermContext = await this.tier3.getContextString(task.project_id, step.description);
+
+        const context = {
+            task_id: task.id,
+            project_id: task.project_id,
+            user_id: task.user_id,
+            step_id: step.id,
+            recent_context: recentContext,
+            rag_context: longTermContext,
+            library_ids: [], // Would be populated from project settings
+        };
+
+        // Execute the agent
+        const startTime = Date.now();
+        const result = await executor(step.description, context);
+        result.duration_ms = Date.now() - startTime;
+
+        return result;
+    }
+
+    /**
+     * Finalize completed task with memory updates
+     */
+    private async finalizeTask(
+        taskId: string,
+        agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number }>
+    ): Promise<void> {
+        const task = await this.getTask(taskId);
+        if (!task) return;
+
+        await this.updateTaskStatus(taskId, 'completed');
+        await this.redis.set(`task:${taskId}`, '$.completed_at', new Date().toISOString());
+
+        // Compile results for memory
+        const results = task.todo_list
+            .filter(s => s.result)
+            .map(s => {
+                const result = s.result as { explanation?: string; outputs?: Record<string, unknown> };
+                return result.explanation || JSON.stringify(result.outputs || {}).substring(0, 200);
+            })
+            .join('\n');
+
+        // Generate session summary (Tier 2 memory)
+        try {
+            await this.tier2.createSummary(task.project_id, taskId, {
+                goal: task.original_query,
+                outcome: task.status === 'completed' ? 'Successfully completed' : 'Failed',
+                agents_invoked: agentsInvoked,
+                raw_results: results,
+            });
+        } catch (error) {
+            console.error('[Orchestrator] Failed to create tier 2 summary:', error);
+        }
+
+        // Extract and embed important findings (Tier 3 memory)
+        try {
+            const memoriesStored = await this.tier3.extractAndStore(task.project_id, taskId, results);
+            console.log(`[Orchestrator] Stored ${memoriesStored} long-term memories from task ${taskId}`);
+        } catch (error) {
+            console.error('[Orchestrator] Failed to extract tier 3 memories:', error);
+        }
     }
 
     /**
@@ -129,9 +270,9 @@ export class Orchestrator {
      */
     private async getOrCreateDefaultProject(userId: string): Promise<string> {
         // Check for existing default project
-        const existingKeys = await this.redis.keys(`project:*`);
+        const existingKeys = await this.redis.keys('project:*');
         for (const key of existingKeys) {
-            const project = await this.redis.get<Project>(key);
+            const project = await this.redis.get(key) as Project | null;
             if (project?.status === 'active') {
                 return project.id;
             }
@@ -185,7 +326,7 @@ export class Orchestrator {
     /**
      * Update step result
      */
-    private async updateStepResult(taskId: string, stepId: string, result: unknown): Promise<void> {
+    private async updateStepResult(taskId: string, stepId: string, result: AgentResult): Promise<void> {
         const task = await this.getTask(taskId);
         if (!task) return;
 
@@ -207,21 +348,6 @@ export class Orchestrator {
 
         const completedSteps = task.steps_completed;
         return step.depends_on.every(dep => completedSteps.includes(dep));
-    }
-
-    /**
-     * Execute a single step (placeholder - would dispatch to agents)
-     */
-    private async executeStep(task: Task, step: TodoItem): Promise<unknown> {
-        // TODO: Implement agent dispatch via n8n or direct execution
-        console.log(`Executing step ${step.id} with agent ${step.agent}`);
-
-        // Placeholder result
-        return {
-            agent: step.agent,
-            description: step.description,
-            executed_at: new Date().toISOString(),
-        };
     }
 
     /**
@@ -247,26 +373,14 @@ export class Orchestrator {
     }
 
     /**
-     * Finalize completed task
-     */
-    private async finalizeTask(taskId: string): Promise<void> {
-        await this.updateTaskStatus(taskId, 'completed');
-        await this.redis.set(`task:${taskId}`, '$.completed_at', new Date().toISOString());
-
-        // TODO: Generate session summary (Tier 2 memory)
-        // TODO: Embed important findings (Tier 3 memory)
-    }
-
-    /**
      * List projects for a user
      */
-    async listProjects(userId: string): Promise<Project[]> {
-        // TODO: Implement proper search with RediSearch
+    async listProjects(_userId: string): Promise<Project[]> {
         const keys = await this.redis.keys('project:*');
         const projects: Project[] = [];
 
         for (const key of keys) {
-            const project = await this.redis.get<Project>(key);
+            const project = await this.redis.get(key) as Project | null;
             if (project) {
                 const result = ProjectSchema.safeParse(project);
                 if (result.success) {
@@ -282,12 +396,11 @@ export class Orchestrator {
      * Get pending approvals for user
      */
     async getPendingApprovals(userId: string): Promise<Approval[]> {
-        // TODO: Implement proper search with RediSearch
         const keys = await this.redis.keys('approval:*');
         const approvals: Approval[] = [];
 
         for (const key of keys) {
-            const approval = await this.redis.get<Approval>(key);
+            const approval = await this.redis.get(key) as Approval | null;
             if (approval?.status === 'pending' && approval.user_id === userId) {
                 const result = ApprovalSchema.safeParse(approval);
                 if (result.success) {
@@ -303,7 +416,7 @@ export class Orchestrator {
      * Respond to an approval request
      */
     async respondToApproval(approvalId: string, approved: boolean, notes?: string): Promise<void> {
-        const approval = await this.redis.get<Approval>(`approval:${approvalId}`);
+        const approval = await this.redis.get(`approval:${approvalId}`) as Approval | null;
         if (!approval) throw new Error(`Approval not found: ${approvalId}`);
 
         await this.redis.set(`approval:${approvalId}`, '$.status', approved ? 'approved' : 'rejected');
@@ -314,14 +427,26 @@ export class Orchestrator {
 
         // Resume task execution if approved
         if (approved) {
-            // Update step status and resume execution
             await this.updateStepStatus(approval.task_id, approval.step_id, 'completed');
-
             // Continue task execution in background
             this.executeTask(approval.task_id).catch(console.error);
         } else {
-            // Mark task as failed due to rejection
             await this.updateTaskStatus(approval.task_id, 'failed');
         }
+    }
+
+    /**
+     * Get memory context for a task
+     */
+    async getMemoryContext(taskId: string, projectId: string, query: string): Promise<{
+        recent: string;
+        summaries: string;
+        longTerm: string;
+    }> {
+        return {
+            recent: await this.tier1.getContextString(taskId),
+            summaries: await this.tier2.getContextString(projectId),
+            longTerm: await this.tier3.getContextString(projectId, query),
+        };
     }
 }

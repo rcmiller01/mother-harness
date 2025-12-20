@@ -1,20 +1,37 @@
 /**
  * Tier 2 Memory - Session Summaries
- * Structured summaries stored after task completion
+ * LLM-generated summaries stored after task completion
  */
 
 import type { SessionSummary, Project } from '@mother-harness/shared';
-import { getRedisJSON } from '@mother-harness/shared';
+import { getRedisJSON, getLLMClient } from '@mother-harness/shared';
 import { nanoid } from 'nanoid';
 
 /** Maximum session summaries per project */
 const MAX_SESSION_SUMMARIES = 20;
 
+const SUMMARY_PROMPT = `Create a concise summary of this task session:
+
+Goal: {goal}
+Agents Used: {agents}
+Results: {results}
+
+Return a JSON object:
+{
+  "summary": "One sentence summary of what was accomplished",
+  "key_findings": ["Key finding 1", "Key finding 2", "Key finding 3"],
+  "decisions_made": ["Any decisions made during this session"],
+  "follow_up_items": ["Items that need follow-up"]
+}
+
+Be concise - each finding should be one sentence.`;
+
 export class Tier2Memory {
     private redis = getRedisJSON();
+    private llm = getLLMClient();
 
     /**
-     * Create a session summary after task completion
+     * Create a session summary after task completion using LLM
      */
     async createSummary(
         projectId: string,
@@ -22,21 +39,51 @@ export class Tier2Memory {
         details: {
             goal: string;
             outcome: string;
-            key_findings: string[];
             agents_invoked: SessionSummary['agents_invoked'];
+            raw_results?: string;
         }
     ): Promise<SessionSummary> {
+        // Generate LLM summary if we have enough content
+        let llmSummary: {
+            summary: string;
+            key_findings: string[];
+            decisions_made?: string[];
+            follow_up_items?: string[];
+        } | null = null;
+
+        if (details.raw_results && details.raw_results.length > 50) {
+            const prompt = SUMMARY_PROMPT
+                .replace('{goal}', details.goal)
+                .replace('{agents}', details.agents_invoked.map(a => a.agent).join(', '))
+                .replace('{results}', details.raw_results.substring(0, 2000));
+
+            const result = await this.llm.json<{
+                summary: string;
+                key_findings: string[];
+                decisions_made?: string[];
+                follow_up_items?: string[];
+            }>(prompt, {
+                system: 'You are a session summarizer. Create concise, informative summaries.',
+                temperature: 0.3,
+                max_tokens: 512,
+            });
+
+            if (result.data) {
+                llmSummary = result.data;
+            }
+        }
+
         const summary: SessionSummary = {
             id: `summary-${nanoid()}`,
             task_id: taskId,
-            summary: `${details.goal} - ${details.outcome}`,
-            key_findings: details.key_findings,
+            summary: llmSummary?.summary ?? `${details.goal} - ${details.outcome}`,
+            key_findings: llmSummary?.key_findings ?? [details.outcome],
             agents_invoked: details.agents_invoked,
             timestamp: new Date().toISOString(),
         };
 
         // Get current project
-        const project = await this.redis.get<Project>(`project:${projectId}`);
+        const project = await this.redis.get(`project:${projectId}`) as Project | null;
         if (!project) {
             throw new Error(`Project not found: ${projectId}`);
         }
@@ -54,7 +101,7 @@ export class Tier2Memory {
      * Get session summaries for a project
      */
     async getSummaries(projectId: string): Promise<SessionSummary[]> {
-        const project = await this.redis.get<Project>(`project:${projectId}`);
+        const project = await this.redis.get(`project:${projectId}`) as Project | null;
         return project?.session_summaries ?? [];
     }
 
@@ -97,5 +144,39 @@ export class Tier2Memory {
     async getSummaryByTask(projectId: string, taskId: string): Promise<SessionSummary | undefined> {
         const summaries = await this.getSummaries(projectId);
         return summaries.find(s => s.task_id === taskId);
+    }
+
+    /**
+     * Generate a consolidated summary across multiple sessions
+     */
+    async generateProjectSummary(projectId: string): Promise<string> {
+        const summaries = await this.getSummaries(projectId);
+
+        if (summaries.length === 0) {
+            return 'No sessions recorded for this project.';
+        }
+
+        // Compile all findings
+        const allFindings = summaries.flatMap(s => s.key_findings);
+        const allAgents = [...new Set(summaries.flatMap(s => s.agents_invoked.map(a => a.agent)))];
+
+        const prompt = `Create a brief project summary:
+
+Sessions: ${summaries.length}
+Agents Used: ${allAgents.join(', ')}
+All Findings:
+${allFindings.slice(0, 15).map((f, i) => `${i + 1}. ${f}`).join('\n')}
+
+Write a 2-3 sentence summary of what has been accomplished in this project.`;
+
+        const result = await this.llm.complete(prompt, {
+            system: 'You are a project summarizer. Be concise.',
+            temperature: 0.3,
+            max_tokens: 256,
+        });
+
+        return result.finish_reason === 'error'
+            ? `Project has ${summaries.length} sessions using ${allAgents.join(', ')}.`
+            : result.content;
     }
 }
