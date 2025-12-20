@@ -17,7 +17,7 @@ Mother-Harness is a three-tiered agent orchestration system designed for complex
 ```
 mother-harness/
 ├── docker-compose.yml          # All services configuration
-├── .env.example                 # Environment template
+├── env.example                  # Environment template
 ├── package.json                 # Root workspace config
 ├── pnpm-workspace.yaml          # pnpm workspaces
 ├── tsconfig.json                # Base TypeScript config
@@ -70,7 +70,7 @@ mother-harness/
 
 3. **Copy environment template**
    ```bash
-   cp .env.example .env
+   cp env.example .env
    # Edit .env with your configuration
    ```
 

@@ -26,8 +26,8 @@ services:
 
   orchestrator:
     build:
-      context: ./services/orchestrator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/orchestrator/Dockerfile
     container_name: mother-orchestrator
     ports:
       - "8000:8000"
@@ -51,8 +51,8 @@ services:
 
   docling:
     build:
-      context: ./services/docling
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/docling/Dockerfile
     container_name: mother-docling
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:-mother_dev_password}@redis-stack:6379
@@ -100,8 +100,8 @@ services:
 
   dashboard:
     build:
-      context: ./services/dashboard
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/dashboard/Dockerfile
     container_name: mother-dashboard
     ports:
       - "3000:3000"

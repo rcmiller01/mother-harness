@@ -108,6 +108,42 @@ app.post('/api/approvals/:id/respond', async (request, reply) => {
     }
 });
 
+// WebSocket endpoint for real-time task updates
+app.get('/ws', { websocket: true }, (connection, request) => {
+    const { socket } = connection;
+    const taskId = new URL(request.url, 'http://localhost').searchParams.get('task_id');
+
+    app.log.info({ task_id: taskId }, 'WebSocket connection established');
+
+    socket.on('message', (message) => {
+        try {
+            const data = JSON.parse(message.toString());
+            app.log.debug({ data }, 'WebSocket message received');
+            
+            // Handle ping/pong for keepalive
+            if (data.type === 'ping') {
+                socket.send(JSON.stringify({ type: 'pong' }));
+            }
+        } catch (error) {
+            app.log.error(error, 'Failed to parse WebSocket message');
+        }
+    });
+
+    socket.on('close', () => {
+        app.log.info({ task_id: taskId }, 'WebSocket connection closed');
+    });
+
+    socket.on('error', (error) => {
+        app.log.error({ error, task_id: taskId }, 'WebSocket error');
+    });
+
+    // Send initial connection confirmation
+    socket.send(JSON.stringify({ 
+        type: 'connected', 
+        task_id: taskId 
+    }));
+});
+
 // Check Redis health
 async function checkRedisHealth(): Promise<boolean> {
     try {
