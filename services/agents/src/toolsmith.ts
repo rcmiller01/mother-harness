@@ -1,194 +1,205 @@
 /**
  * Toolsmith Agent
- * Creates deterministic tool wrappers for common operations
+ * Creates and manages deterministic tools for the agent system
  */
 
 import type { AgentType } from '@mother-harness/shared';
+import { getLLMClient, getToolRegistry } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
+import { nanoid } from 'nanoid';
 
 /** Tool definition */
-export interface ToolDefinition {
+interface ToolDefinition {
     name: string;
     description: string;
-    version: string;
-    inputs: Array<{
-        name: string;
-        type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-        required: boolean;
-        description: string;
-    }>;
-    outputs: Array<{
-        name: string;
-        type: string;
-        description: string;
-    }>;
-    examples: Array<{
-        input: Record<string, unknown>;
-        output: Record<string, unknown>;
-    }>;
+    parameters: Record<string, unknown>;
+    return_type: string;
+    implementation: string;
+    examples: string[];
 }
+
+const TOOLSMITH_SYSTEM_PROMPT = `You are an expert tool developer. Your role is to:
+1. Create well-designed, reusable tools
+2. Follow deterministic patterns - same input = same output
+3. Include proper error handling and validation
+4. Write clear documentation and examples
+5. Ensure tools are safe and sandboxed
+
+Tools should be atomic, focused, and composable.`;
+
+const TOOL_DESIGN_PROMPT = `Design a deterministic tool based on this request:
+
+Request: {request}
+Context: {context}
+
+Return a JSON object:
+{
+  "name": "tool_name_in_snake_case",
+  "description": "Clear description of what the tool does",
+  "parameters": {
+    "param_name": {
+      "type": "string/number/boolean/array/object",
+      "description": "what this parameter is for",
+      "required": true/false,
+      "default": "default value if any"
+    }
+  },
+  "return_type": "description of return value",
+  "implementation": "TypeScript function body (will be wrapped in async function)",
+  "examples": [
+    "Example usage 1",
+    "Example usage 2"
+  ],
+  "test_cases": [
+    { "input": {}, "expected_output": {} }
+  ]
+}
+
+The implementation should be pure TypeScript that can run in a sandboxed environment.
+Available in scope: console, JSON, Math, Date, String, Array, Object.`;
 
 export class ToolsmithAgent extends BaseAgent {
     readonly agentType: AgentType = 'toolsmith';
+    private llm = getLLMClient();
 
     protected async run(inputs: string, context: AgentContext): Promise<AgentResult> {
         const startTime = Date.now();
 
-        // Parse the tool creation request
-        const request = this.parseRequest(inputs);
+        // Design the tool
+        const design = await this.designTool(inputs, context);
 
-        // Generate tool definition
-        const definition = await this.generateDefinition(request, context);
+        if (!design.tool) {
+            return {
+                success: false,
+                outputs: { error: 'Failed to design tool' },
+                explanation: 'Tool design failed',
+                tokens_used: design.tokens,
+                duration_ms: Date.now() - startTime,
+            };
+        }
 
-        // Generate tool code
-        const code = await this.generateCode(definition);
+        // Validate the tool
+        const validation = await this.validateTool(design.tool);
 
-        // Generate tests
-        const tests = await this.generateTests(definition);
+        // Register if valid
+        if (validation.valid) {
+            await this.registerTool(design.tool);
+        }
 
         return {
-            success: true,
+            success: validation.valid,
             outputs: {
-                tool_definition: definition,
-                tool_code: code,
-                tests,
-                documentation: this.generateDocs(definition),
+                tool: design.tool,
+                validation: validation,
+                registered: validation.valid,
             },
-            explanation: `Created tool: ${definition.name}`,
-            artifacts: [`tools/${definition.name}.ts`],
-            tokens_used: 400,
+            explanation: validation.valid
+                ? `Created and registered tool "${design.tool.name}"`
+                : `Tool design has issues: ${validation.issues.join(', ')}`,
+            artifacts: validation.valid ? [design.tool.name] : [],
+            tokens_used: design.tokens,
             duration_ms: Date.now() - startTime,
         };
     }
 
-    private parseRequest(inputs: string): {
-        purpose: string;
-        inputs?: Record<string, string>;
-        expected_outputs?: string[];
-    } {
+    private async designTool(
+        request: string,
+        context: AgentContext
+    ): Promise<{ tool: ToolDefinition | null; tokens: number }> {
+        const prompt = TOOL_DESIGN_PROMPT
+            .replace('{request}', request)
+            .replace('{context}', context.recent_context ?? 'No additional context');
+
+        const result = await this.llm.json<ToolDefinition>(prompt, {
+            system: TOOLSMITH_SYSTEM_PROMPT,
+            temperature: 0.3,
+            max_tokens: 4096,
+        });
+
+        if (result.data && result.data.name && result.data.implementation) {
+            return {
+                tool: result.data,
+                tokens: result.raw.tokens_used.total,
+            };
+        }
+
+        return { tool: null, tokens: result.raw.tokens_used.total };
+    }
+
+    private async validateTool(
+        tool: ToolDefinition
+    ): Promise<{ valid: boolean; issues: string[] }> {
+        const issues: string[] = [];
+
+        // Name validation
+        if (!/^[a-z][a-z0-9_]*$/.test(tool.name)) {
+            issues.push('Tool name must be snake_case starting with a letter');
+        }
+
+        // Description validation
+        if (!tool.description || tool.description.length < 10) {
+            issues.push('Description must be at least 10 characters');
+        }
+
+        // Implementation validation
+        if (!tool.implementation || tool.implementation.length < 5) {
+            issues.push('Implementation is missing or too short');
+        }
+
+        // Check for unsafe patterns
+        const unsafePatterns = [
+            /eval\s*\(/,
+            /Function\s*\(/,
+            /import\s+/,
+            /require\s*\(/,
+            /process\./,
+            /fs\./,
+            /child_process/,
+            /exec\s*\(/,
+        ];
+
+        for (const pattern of unsafePatterns) {
+            if (pattern.test(tool.implementation)) {
+                issues.push(`Implementation contains unsafe pattern: ${pattern.source}`);
+            }
+        }
+
         return {
-            purpose: inputs,
+            valid: issues.length === 0,
+            issues,
         };
     }
 
-    private async generateDefinition(
-        request: ReturnType<typeof this.parseRequest>,
-        _context: AgentContext
-    ): Promise<ToolDefinition> {
-        // TODO: Use LLM to generate proper tool definition
+    private async registerTool(tool: ToolDefinition): Promise<void> {
+        try {
+            const registry = getToolRegistry();
 
-        const name = request.purpose
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '_')
-            .substring(0, 30);
+            await registry.register({
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters,
+                handler: async (params: Record<string, unknown>) => {
+                    // Create sandboxed execution context
+                    const fn = new Function(
+                        'params',
+                        'console',
+                        'JSON',
+                        'Math',
+                        'Date',
+                        `return (async () => { ${tool.implementation} })()`
+                    );
 
-        return {
-            name,
-            description: request.purpose,
-            version: '1.0.0',
-            inputs: [
-                {
-                    name: 'input',
-                    type: 'string',
-                    required: true,
-                    description: 'Input for the tool',
+                    return fn(
+                        params,
+                        console,
+                        JSON,
+                        Math,
+                        Date
+                    );
                 },
-            ],
-            outputs: [
-                {
-                    name: 'result',
-                    type: 'string',
-                    description: 'Result of the tool operation',
-                },
-            ],
-            examples: [
-                {
-                    input: { input: 'example input' },
-                    output: { result: 'example output' },
-                },
-            ],
-        };
-    }
-
-    private async generateCode(definition: ToolDefinition): Promise<string> {
-        // TODO: Use LLM to generate actual tool implementation
-
-        const inputParams = definition.inputs
-            .map(i => `${i.name}: ${i.type}`)
-            .join(', ');
-
-        return `/**
- * ${definition.name}
- * ${definition.description}
- * @version ${definition.version}
- */
-
-export interface ${this.toPascalCase(definition.name)}Input {
-${definition.inputs.map(i => `  ${i.name}${i.required ? '' : '?'}: ${i.type};`).join('\n')}
-}
-
-export interface ${this.toPascalCase(definition.name)}Output {
-${definition.outputs.map(o => `  ${o.name}: ${o.type};`).join('\n')}
-}
-
-export async function ${this.toCamelCase(definition.name)}(
-  input: ${this.toPascalCase(definition.name)}Input
-): Promise<${this.toPascalCase(definition.name)}Output> {
-  // TODO: Implement the tool logic
-  return {
-    result: \`Processed: \${input.input}\`,
-  };
-}
-`;
-    }
-
-    private async generateTests(definition: ToolDefinition): Promise<string> {
-        return `import { describe, test, expect } from 'vitest';
-import { ${this.toCamelCase(definition.name)} } from './${definition.name}';
-
-describe('${definition.name}', () => {
-${definition.examples.map((ex, i) => `
-  test('example ${i + 1}', async () => {
-    const result = await ${this.toCamelCase(definition.name)}(${JSON.stringify(ex.input)});
-    expect(result).toBeDefined();
-  });
-`).join('')}
-});
-`;
-    }
-
-    private generateDocs(definition: ToolDefinition): string {
-        return `# ${definition.name}
-
-${definition.description}
-
-## Version
-${definition.version}
-
-## Inputs
-${definition.inputs.map(i => `- \`${i.name}\` (${i.type}${i.required ? ', required' : ''}): ${i.description}`).join('\n')}
-
-## Outputs
-${definition.outputs.map(o => `- \`${o.name}\` (${o.type}): ${o.description}`).join('\n')}
-
-## Examples
-${definition.examples.map((ex, i) => `
-### Example ${i + 1}
-Input: \`${JSON.stringify(ex.input)}\`
-Output: \`${JSON.stringify(ex.output)}\`
-`).join('')}
-`;
-    }
-
-    private toPascalCase(str: string): string {
-        return str
-            .split('_')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join('');
-    }
-
-    private toCamelCase(str: string): string {
-        const pascal = this.toPascalCase(str);
-        return pascal.charAt(0).toLowerCase() + pascal.slice(1);
+            });
+        } catch (error) {
+            console.error('[ToolsmithAgent] Failed to register tool:', error);
+        }
     }
 }

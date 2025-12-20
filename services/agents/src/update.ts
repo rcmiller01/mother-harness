@@ -1,127 +1,216 @@
 /**
  * Update Agent
- * Tracks software inventory, recommends updates, assesses impact
+ * Discovers and recommends software updates with impact analysis
  */
 
 import type { AgentType } from '@mother-harness/shared';
+import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
 /** Software inventory item */
-export interface SoftwareItem {
+interface SoftwareItem {
     name: string;
+    type: 'dependency' | 'tool' | 'runtime' | 'os' | 'service';
     current_version: string;
-    latest_version?: string;
-    type: 'npm' | 'docker' | 'system' | 'python' | 'other';
-    update_available: boolean;
-    last_checked: string;
+    source: string;
 }
 
 /** Update recommendation */
-export interface UpdateRecommendation {
+interface UpdateRecommendation {
     item: SoftwareItem;
-    urgency: 'critical' | 'recommended' | 'optional';
+    latest_version: string;
+    update_urgency: 'critical' | 'high' | 'medium' | 'low';
     breaking_changes: boolean;
-    migration_steps?: string[];
-    risk_level: 'low' | 'medium' | 'high';
-    release_notes_url?: string;
+    security_related: boolean;
+    summary: string;
+    migration_notes: string[];
+    rollback_plan: string;
 }
+
+const UPDATE_SYSTEM_PROMPT = `You are a software update specialist. Your role is to:
+1. Analyze software dependencies and tools for updates
+2. Assess the impact and urgency of updates
+3. Identify security-related updates
+4. Provide clear migration guidance
+5. Suggest rollback strategies
+
+Prioritize security updates. Be realistic about breaking changes.`;
+
+const ANALYZE_UPDATES_PROMPT = `Analyze these software items for updates:
+
+Items:
+{items}
+
+Context: {context}
+
+For each item, return a JSON array:
+[
+  {
+    "name": "package name",
+    "current_version": "X.Y.Z",
+    "latest_version": "A.B.C",
+    "update_urgency": "critical" | "high" | "medium" | "low",
+    "breaking_changes": true/false,
+    "security_related": true/false,
+    "summary": "brief summary of what changed",
+    "key_changes": ["notable changes"],
+    "migration_notes": ["steps needed to update"],
+    "rollback_plan": "how to rollback if needed"
+  }
+]
+
+Be realistic about version numbers based on your knowledge.`;
 
 export class UpdateAgent extends BaseAgent {
     readonly agentType: AgentType = 'update';
+    private llm = getLLMClient();
 
     protected async run(inputs: string, context: AgentContext): Promise<AgentResult> {
         const startTime = Date.now();
+        let totalTokens = 0;
 
-        // Parse the update request
-        const request = this.parseRequest(inputs);
+        // Discover software inventory
+        const inventory = await this.discoverInventory(inputs, context);
+        totalTokens += inventory.tokens;
 
-        // Get current inventory
-        const inventory = await this.getInventory(request.scope, context);
+        if (inventory.items.length === 0) {
+            return {
+                success: true,
+                outputs: { message: 'No software items found to check' },
+                explanation: 'No items in inventory',
+                tokens_used: totalTokens,
+                duration_ms: Date.now() - startTime,
+            };
+        }
 
         // Check for updates
-        const updates = await this.checkUpdates(inventory);
+        const updates = await this.checkUpdates(inventory.items, context);
+        totalTokens += updates.tokens;
 
-        // Generate recommendations
-        const recommendations = await this.generateRecommendations(updates, context);
+        // Categorize by urgency
+        const critical = updates.recommendations.filter(u => u.update_urgency === 'critical');
+        const security = updates.recommendations.filter(u => u.security_related);
+        const breaking = updates.recommendations.filter(u => u.breaking_changes);
 
         return {
             success: true,
             outputs: {
-                update_recommendations: recommendations,
-                breaking_changes: recommendations.filter(r => r.breaking_changes),
-                migration_steps: recommendations.flatMap(r => r.migration_steps ?? []),
+                inventory: inventory.items,
+                recommendations: updates.recommendations,
+                summary: {
+                    total_items: inventory.items.length,
+                    updates_available: updates.recommendations.length,
+                    critical_updates: critical.length,
+                    security_updates: security.length,
+                    breaking_updates: breaking.length,
+                },
+                priority_updates: critical.concat(
+                    security.filter(s => !critical.includes(s))
+                ),
             },
-            explanation: `Found ${recommendations.length} update recommendation(s)`,
-            tokens_used: 300,
+            explanation: `Found ${updates.recommendations.length} updates (${critical.length} critical, ${security.length} security-related)`,
+            tokens_used: totalTokens,
             duration_ms: Date.now() - startTime,
         };
     }
 
-    private parseRequest(inputs: string): {
-        scope: 'all' | 'npm' | 'docker' | 'system';
-        urgency_filter?: 'critical' | 'recommended' | 'all';
-    } {
+    private async discoverInventory(
+        inputs: string,
+        context: AgentContext
+    ): Promise<{ items: SoftwareItem[]; tokens: number }> {
+        // Try to parse input as inventory
+        try {
+            const parsed = JSON.parse(inputs) as SoftwareItem[];
+            if (Array.isArray(parsed)) {
+                return { items: parsed, tokens: 0 };
+            }
+        } catch {
+            // Not JSON, use LLM to parse
+        }
+
+        const prompt = `Extract software items from this input:
+
+Input: ${inputs}
+Context: ${context.recent_context ?? 'No context'}
+
+Return a JSON array:
+[
+  {
+    "name": "package/tool name",
+    "type": "dependency" | "tool" | "runtime" | "os" | "service",
+    "current_version": "version if known, or 'unknown'",
+    "source": "where it comes from (npm, pip, system, etc.)"
+  }
+]`;
+
+        const result = await this.llm.json<SoftwareItem[]>(prompt, {
+            system: UPDATE_SYSTEM_PROMPT,
+            temperature: 0.2,
+        });
+
         return {
-            scope: 'all',
-            urgency_filter: 'all',
+            items: result.data ?? [],
+            tokens: result.raw.tokens_used.total,
         };
     }
 
-    private async getInventory(
-        scope: string,
-        _context: AgentContext
-    ): Promise<SoftwareItem[]> {
-        // TODO: Discover software inventory
-        // - Parse package.json for npm
-        // - Parse docker-compose.yml for containers
-        // - Query system packages
-
-        return [
-            {
-                name: 'typescript',
-                current_version: '5.3.0',
-                latest_version: '5.4.0',
-                type: 'npm',
-                update_available: true,
-                last_checked: new Date().toISOString(),
-            },
-            {
-                name: 'redis/redis-stack',
-                current_version: '7.2.0',
-                latest_version: '7.2.0',
-                type: 'docker',
-                update_available: false,
-                last_checked: new Date().toISOString(),
-            },
-        ];
-    }
-
     private async checkUpdates(
-        inventory: SoftwareItem[]
-    ): Promise<SoftwareItem[]> {
-        // TODO: Check each item for available updates
-        // - npm: query registry.npmjs.org
-        // - docker: query Docker Hub API
-        // - system: query package manager
+        items: SoftwareItem[],
+        context: AgentContext
+    ): Promise<{ recommendations: UpdateRecommendation[]; tokens: number }> {
+        const itemsJson = JSON.stringify(items, null, 2);
 
-        return inventory.filter(item => item.update_available);
-    }
+        const prompt = ANALYZE_UPDATES_PROMPT
+            .replace('{items}', itemsJson)
+            .replace('{context}', context.recent_context ?? 'No additional context');
 
-    private async generateRecommendations(
-        updates: SoftwareItem[],
-        _context: AgentContext
-    ): Promise<UpdateRecommendation[]> {
-        // TODO: Use RAG to fetch release notes and assess impact
-        // - Search for breaking changes
-        // - Generate migration steps
-        // - Assess risk level
+        const result = await this.llm.json<Array<{
+            name: string;
+            current_version: string;
+            latest_version: string;
+            update_urgency: 'critical' | 'high' | 'medium' | 'low';
+            breaking_changes: boolean;
+            security_related: boolean;
+            summary: string;
+            key_changes?: string[];
+            migration_notes: string[];
+            rollback_plan: string;
+        }>>(prompt, {
+            system: UPDATE_SYSTEM_PROMPT,
+            temperature: 0.3,
+            max_tokens: 4096,
+        });
 
-        return updates.map(item => ({
-            item,
-            urgency: 'recommended' as const,
-            breaking_changes: false,
-            migration_steps: [`Update ${item.name} from ${item.current_version} to ${item.latest_version}`],
-            risk_level: 'low' as const,
-        }));
+        if (!result.data || !Array.isArray(result.data)) {
+            return { recommendations: [], tokens: result.raw.tokens_used.total };
+        }
+
+        // Map back to items
+        const recommendations: UpdateRecommendation[] = result.data
+            .filter(update => update.current_version !== update.latest_version)
+            .map(update => {
+                const item = items.find(i => i.name === update.name) ?? {
+                    name: update.name,
+                    type: 'dependency' as const,
+                    current_version: update.current_version,
+                    source: 'unknown',
+                };
+
+                return {
+                    item,
+                    latest_version: update.latest_version,
+                    update_urgency: update.update_urgency,
+                    breaking_changes: update.breaking_changes,
+                    security_related: update.security_related,
+                    summary: update.summary,
+                    migration_notes: update.migration_notes,
+                    rollback_plan: update.rollback_plan,
+                };
+            });
+
+        return {
+            recommendations,
+            tokens: result.raw.tokens_used.total,
+        };
     }
 }

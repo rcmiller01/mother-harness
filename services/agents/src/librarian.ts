@@ -1,174 +1,303 @@
 /**
  * Librarian Agent
- * Ingests documents, creates embeddings, manages libraries
+ * Manages document libraries, ingestion, and organization
  */
 
-import type { AgentType, Library, DoclingJob } from '@mother-harness/shared';
-import { getRedisJSON, createLibrary } from '@mother-harness/shared';
+import type { AgentType, Library } from '@mother-harness/shared';
+import { getLLMClient, getRedisJSON } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 import { nanoid } from 'nanoid';
 
-/** Ingestion report */
-export interface IngestionReport {
-    library_id: string;
-    library_name: string;
-    files_processed: number;
-    chunks_created: number;
-    embeddings_generated: number;
-    images_extracted: number;
-    errors: Array<{ file: string; error: string }>;
-    duration_seconds: number;
-}
+/** Librarian command types */
+type LibrarianCommand = 'create_library' | 'add_document' | 'search' | 'organize' | 'status';
+
+const LIBRARIAN_SYSTEM_PROMPT = `You are a knowledge management specialist. Your role is to:
+1. Organize and categorize documents effectively
+2. Create meaningful tags and metadata
+3. Ensure documents are easily discoverable
+4. Maintain library structure and organization
+5. Help users find relevant information
+
+Be systematic and consistent in your organization approach.`;
+
+const PARSE_COMMAND_PROMPT = `Parse this librarian command:
+
+Input: {input}
+
+Return a JSON object:
+{
+  "command": "create_library" | "add_document" | "search" | "organize" | "status",
+  "library_name": "name if creating/targeting a library",
+  "documents": ["paths to documents if adding"],
+  "search_query": "search query if searching",
+  "metadata": { "any additional metadata" }
+}`;
+
+const ORGANIZE_PROMPT = `Suggest organization for these documents:
+
+Documents: {documents}
+Current Library: {library}
+
+Return a JSON object:
+{
+  "suggested_tags": ["array of suggested tags"],
+  "suggested_categories": ["array of categories"],
+  "document_assignments": [
+    { "document": "doc name", "tags": ["tag1"], "category": "category" }
+  ],
+  "summary": "brief summary of the organization scheme"
+}`;
 
 export class LibrarianAgent extends BaseAgent {
     readonly agentType: AgentType = 'librarian';
+    private llm = getLLMClient();
     private redis = getRedisJSON();
 
     protected async run(inputs: string, context: AgentContext): Promise<AgentResult> {
         const startTime = Date.now();
+        let totalTokens = 0;
 
-        // Parse the librarian task
-        const task = this.parseTask(inputs);
+        // Parse the command
+        const command = await this.parseCommand(inputs);
+        totalTokens += command.tokens;
 
-        let report: IngestionReport;
-
-        switch (task.action) {
-            case 'create_library':
-                report = await this.createLibraryAction(task.name!, task.path!, context);
-                break;
-            case 'ingest':
-                report = await this.ingestDocuments(task.library_id!, task.files, context);
-                break;
-            case 'scan':
-                report = await this.scanLibrary(task.library_id!, context);
-                break;
-            default:
-                throw new Error(`Unknown librarian action: ${task.action}`);
-        }
+        // Execute the command
+        const result = await this.executeCommand(command, context);
+        totalTokens += result.tokens;
 
         return {
-            success: true,
-            outputs: {
-                ingestion_report: report,
-                chunk_count: report.chunks_created,
-                embedding_stats: {
-                    total: report.embeddings_generated,
-                    failed: report.errors.length,
-                },
-            },
-            explanation: `Processed ${report.files_processed} files, created ${report.chunks_created} chunks`,
-            tokens_used: 100,
+            success: result.success,
+            outputs: result.data,
+            explanation: result.message,
+            tokens_used: totalTokens,
             duration_ms: Date.now() - startTime,
         };
     }
 
-    private parseTask(inputs: string): {
-        action: 'create_library' | 'ingest' | 'scan';
-        library_id?: string;
-        name?: string;
-        path?: string;
-        files?: string[];
-    } {
-        // TODO: Parse the librarian command
-        // For now, default to scan action
+    private async parseCommand(inputs: string): Promise<{
+        command: LibrarianCommand;
+        library_name?: string;
+        documents?: string[];
+        search_query?: string;
+        metadata?: Record<string, unknown>;
+        tokens: number;
+    }> {
+        const prompt = PARSE_COMMAND_PROMPT.replace('{input}', inputs);
+
+        const result = await this.llm.json<{
+            command: LibrarianCommand;
+            library_name?: string;
+            documents?: string[];
+            search_query?: string;
+            metadata?: Record<string, unknown>;
+        }>(prompt, {
+            system: LIBRARIAN_SYSTEM_PROMPT,
+            temperature: 0.2,
+        });
+
+        if (result.data) {
+            return {
+                ...result.data,
+                tokens: result.raw.tokens_used.total,
+            };
+        }
+
+        // Default to status if parsing fails
         return {
-            action: 'scan',
-            library_id: 'default',
+            command: 'status',
+            tokens: result.raw.tokens_used.total,
         };
     }
 
-    private async createLibraryAction(
+    private async executeCommand(
+        command: Awaited<ReturnType<typeof this.parseCommand>>,
+        context: AgentContext
+    ): Promise<{
+        success: boolean;
+        data: Record<string, unknown>;
+        message: string;
+        tokens: number;
+    }> {
+        switch (command.command) {
+            case 'create_library':
+                return this.createLibrary(command.library_name ?? 'Untitled Library', command.metadata);
+
+            case 'add_document':
+                return this.addDocuments(
+                    command.library_name ?? context.library_ids?.[0] ?? 'default',
+                    command.documents ?? []
+                );
+
+            case 'search':
+                return this.searchLibrary(
+                    command.library_name ?? context.library_ids?.[0],
+                    command.search_query ?? ''
+                );
+
+            case 'organize':
+                return this.organizeLibrary(command.library_name ?? context.library_ids?.[0]);
+
+            case 'status':
+            default:
+                return this.getStatus(context.library_ids);
+        }
+    }
+
+    private async createLibrary(
         name: string,
-        path: string,
-        _context: AgentContext
-    ): Promise<IngestionReport> {
-        const libraryId = `lib-${nanoid()}`;
-        const library = createLibrary(libraryId, name, path, true);
+        metadata?: Record<string, unknown>
+    ): Promise<{ success: boolean; data: Record<string, unknown>; message: string; tokens: number }> {
+        const libraryId = `lib-${nanoid(10)}`;
+        const library: Library = {
+            id: libraryId,
+            name,
+            description: (metadata?.description as string) ?? '',
+            folder_path: (metadata?.folder_path as string) ?? `/libraries/${libraryId}`,
+            watch_enabled: false,
+            document_count: 0,
+            chunk_count: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        };
 
         await this.redis.set(`library:${libraryId}`, '$', library);
 
         return {
-            library_id: libraryId,
-            library_name: name,
-            files_processed: 0,
-            chunks_created: 0,
-            embeddings_generated: 0,
-            images_extracted: 0,
-            errors: [],
-            duration_seconds: 0,
+            success: true,
+            data: { library },
+            message: `Created library "${name}" with ID ${libraryId}`,
+            tokens: 0,
         };
     }
 
-    private async ingestDocuments(
+    private async addDocuments(
         libraryId: string,
-        files: string[] | undefined,
-        _context: AgentContext
-    ): Promise<IngestionReport> {
-        // TODO: Implement actual document ingestion
-        // 1. Read files from library path
-        // 2. Send to Docling for processing
-        // 3. Chunk the extracted content
-        // 4. Generate embeddings
-        // 5. Store in Redis with vectors
+        documents: string[]
+    ): Promise<{ success: boolean; data: Record<string, unknown>; message: string; tokens: number }> {
+        if (documents.length === 0) {
+            return {
+                success: false,
+                data: {},
+                message: 'No documents specified',
+                tokens: 0,
+            };
+        }
 
-        const library = await this.redis.get<Library>(`library:${libraryId}`);
-
-        return {
+        // Queue documents for processing
+        const jobs = documents.map(doc => ({
+            id: `job-${nanoid(10)}`,
             library_id: libraryId,
-            library_name: library?.name ?? 'Unknown',
-            files_processed: files?.length ?? 0,
-            chunks_created: 0,
-            embeddings_generated: 0,
-            images_extracted: 0,
-            errors: [],
-            duration_seconds: 0,
-        };
-    }
-
-    private async scanLibrary(
-        libraryId: string,
-        _context: AgentContext
-    ): Promise<IngestionReport> {
-        // TODO: Scan library folder and ingest new/modified files
-
-        const library = await this.redis.get<Library>(`library:${libraryId}`);
-
-        return {
-            library_id: libraryId,
-            library_name: library?.name ?? 'Unknown',
-            files_processed: 0,
-            chunks_created: 0,
-            embeddings_generated: 0,
-            images_extracted: 0,
-            errors: [],
-            duration_seconds: 0,
-        };
-    }
-
-    /**
-     * Create a Docling job for async processing
-     */
-    async createDoclingJob(
-        libraryId: string,
-        filePath: string,
-        operation: DoclingJob['operation'] = 'ingest'
-    ): Promise<DoclingJob> {
-        const library = await this.redis.get<Library>(`library:${libraryId}`);
-
-        const job: DoclingJob = {
-            id: `docling-${nanoid()}`,
-            library_id: libraryId,
-            library_name: library?.name ?? 'Unknown',
-            file_path: filePath,
-            operation,
-            priority: 'normal',
-            status: 'pending',
+            file_path: doc,
+            status: 'queued' as const,
             created_at: new Date().toISOString(),
+        }));
+
+        for (const job of jobs) {
+            await this.redis.set(`docjob:${job.id}`, '$', job);
+        }
+
+        return {
+            success: true,
+            data: { jobs, count: jobs.length },
+            message: `Queued ${jobs.length} document(s) for processing`,
+            tokens: 0,
         };
+    }
 
-        // TODO: Publish to Redis Stream for processing
-        // await redis.xadd('stream:docling', '*', { job: JSON.stringify(job) });
+    private async searchLibrary(
+        libraryId: string | undefined,
+        query: string
+    ): Promise<{ success: boolean; data: Record<string, unknown>; message: string; tokens: number }> {
+        if (!libraryId) {
+            return {
+                success: false,
+                data: {},
+                message: 'No library specified',
+                tokens: 0,
+            };
+        }
 
-        return job;
+        // Generate embedding for search
+        const embedding = await this.llm.embed(query);
+
+        // Note: Full vector search would use RediSearch FT.SEARCH
+        // This is a simplified implementation
+        return {
+            success: true,
+            data: {
+                query,
+                library_id: libraryId,
+                results: [],
+                message: 'Search results would appear here with full RediSearch integration',
+            },
+            message: `Searched library ${libraryId} for "${query}"`,
+            tokens: 0,
+        };
+    }
+
+    private async organizeLibrary(
+        libraryId: string | undefined
+    ): Promise<{ success: boolean; data: Record<string, unknown>; message: string; tokens: number }> {
+        if (!libraryId) {
+            return {
+                success: false,
+                data: {},
+                message: 'No library specified',
+                tokens: 0,
+            };
+        }
+
+        const library = await this.redis.get(`library:${libraryId}`) as Library | null;
+        if (!library) {
+            return {
+                success: false,
+                data: {},
+                message: `Library ${libraryId} not found`,
+                tokens: 0,
+            };
+        }
+
+        const prompt = ORGANIZE_PROMPT
+            .replace('{documents}', `${library.document_count} documents`)
+            .replace('{library}', library.name);
+
+        const result = await this.llm.json<{
+            suggested_tags: string[];
+            suggested_categories: string[];
+            summary: string;
+        }>(prompt, {
+            system: LIBRARIAN_SYSTEM_PROMPT,
+            temperature: 0.4,
+        });
+
+        return {
+            success: true,
+            data: result.data ?? {},
+            message: `Organization suggestions for ${library.name}`,
+            tokens: result.raw.tokens_used.total,
+        };
+    }
+
+    private async getStatus(
+        libraryIds?: string[]
+    ): Promise<{ success: boolean; data: Record<string, unknown>; message: string; tokens: number }> {
+        const libraries: Library[] = [];
+
+        if (libraryIds && libraryIds.length > 0) {
+            for (const id of libraryIds) {
+                const lib = await this.redis.get(`library:${id}`) as Library | null;
+                if (lib) libraries.push(lib);
+            }
+        }
+
+        return {
+            success: true,
+            data: {
+                libraries,
+                total_count: libraries.length,
+            },
+            message: `Found ${libraries.length} library(ies)`,
+            tokens: 0,
+        };
     }
 }

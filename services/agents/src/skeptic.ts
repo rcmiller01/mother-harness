@@ -1,153 +1,153 @@
 /**
  * Skeptic Agent
- * Challenges assumptions, proposes alternatives, plays devil's advocate
+ * Devils advocate - challenges proposals and identifies weaknesses
  */
 
 import type { AgentType } from '@mother-harness/shared';
+import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
-/** Challenge to a proposal or decision */
-export interface Challenge {
-    aspect: string;
-    concern: string;
-    severity: 'minor' | 'moderate' | 'significant';
-    evidence?: string;
+/** Concern severity */
+type ConcernLevel = 'critical' | 'significant' | 'minor' | 'consideration';
+
+/** Identified concern */
+interface Concern {
+    level: ConcernLevel;
+    area: string;
+    issue: string;
+    potential_impact: string;
+    mitigation?: string;
 }
 
 /** Alternative approach */
-export interface Alternative {
+interface Alternative {
     name: string;
     description: string;
-    advantages: string[];
-    disadvantages: string[];
-    conditions: string; // When this alternative would be better
+    trade_offs: string;
+    when_preferred: string;
 }
+
+const SKEPTIC_SYSTEM_PROMPT = `You are a devil's advocate and critical thinker. Your role is to:
+1. Challenge assumptions and identify blind spots
+2. Find weaknesses in proposals before they become problems
+3. Present alternative viewpoints constructively
+4. Stress-test ideas with edge cases and failure scenarios
+5. Be thorough but fair - acknowledge strengths while highlighting risks
+
+Your goal is to IMPROVE proposals, not tear them down. Be constructive in your criticism.`;
+
+const CRITIQUE_PROMPT = `Critically analyze this proposal:
+
+Proposal: {proposal}
+Context: {context}
+
+Return a JSON object:
+{
+  "overall_assessment": "brief assessment of the proposal's soundness",
+  "concerns": [
+    {
+      "level": "critical" | "significant" | "minor" | "consideration",
+      "area": "which aspect (technical, business, security, etc.)",
+      "issue": "what the concern is",
+      "potential_impact": "what could go wrong",
+      "mitigation": "how to address it"
+    }
+  ],
+  "blind_spots": ["assumptions or areas not considered"],
+  "edge_cases": ["scenarios that might break this"],
+  "alternatives": [
+    {
+      "name": "alternative approach name",
+      "description": "what this alternative entails",
+      "trade_offs": "pros and cons vs original",
+      "when_preferred": "conditions where this is better"
+    }
+  ],
+  "strengths": ["what the proposal does well"],
+  "verdict": "proceed" | "proceed_with_changes" | "reconsider" | "reject",
+  "verdict_rationale": "why this verdict"
+}`;
 
 export class SkepticAgent extends BaseAgent {
     readonly agentType: AgentType = 'skeptic';
+    private llm = getLLMClient();
 
     protected async run(inputs: string, context: AgentContext): Promise<AgentResult> {
         const startTime = Date.now();
 
-        // Analyze the proposal/decision
-        const challenges = await this.findChallenges(inputs, context);
+        const critique = await this.analyzeProposal(inputs, context);
 
-        // Generate alternatives
-        const alternatives = await this.generateAlternatives(inputs, context);
-
-        // Assess overall risk
-        const riskAssessment = this.assessRisk(challenges);
+        const criticalCount = critique.concerns.filter(c => c.level === 'critical').length;
+        const significantCount = critique.concerns.filter(c => c.level === 'significant').length;
 
         return {
             success: true,
             outputs: {
-                challenges,
-                alternatives,
-                risk_assessment: riskAssessment,
+                assessment: critique.overall_assessment,
+                concerns: critique.concerns,
+                blind_spots: critique.blind_spots,
+                edge_cases: critique.edge_cases,
+                alternatives: critique.alternatives,
+                strengths: critique.strengths,
+                verdict: critique.verdict,
+                verdict_rationale: critique.verdict_rationale,
             },
-            explanation: `Identified ${challenges.length} potential concerns and ${alternatives.length} alternatives`,
-            tokens_used: 350,
+            explanation: `Critique complete: ${critique.verdict} (${criticalCount} critical, ${significantCount} significant concerns)`,
+            tokens_used: critique.tokens,
             duration_ms: Date.now() - startTime,
         };
     }
 
-    private async findChallenges(
-        inputs: string,
-        _context: AgentContext
-    ): Promise<Challenge[]> {
-        // TODO: Use LLM to critically analyze the proposal
-        // Look for:
-        // - Unstated assumptions
-        // - Potential failure modes
-        // - Missing considerations
-        // - Logical inconsistencies
+    private async analyzeProposal(
+        proposal: string,
+        context: AgentContext
+    ): Promise<{
+        overall_assessment: string;
+        concerns: Concern[];
+        blind_spots: string[];
+        edge_cases: string[];
+        alternatives: Alternative[];
+        strengths: string[];
+        verdict: 'proceed' | 'proceed_with_changes' | 'reconsider' | 'reject';
+        verdict_rationale: string;
+        tokens: number;
+    }> {
+        const prompt = CRITIQUE_PROMPT
+            .replace('{proposal}', proposal)
+            .replace('{context}', context.recent_context ?? 'No additional context');
 
-        return [
-            {
-                aspect: 'Scalability',
-                concern: 'The proposed approach may not scale beyond 10x current load',
-                severity: 'moderate',
-                evidence: 'Based on similar systems, O(n²) complexity typically becomes problematic around this scale',
-            },
-            {
-                aspect: 'Dependencies',
-                concern: 'Single point of failure in the proposed architecture',
-                severity: 'significant',
-                evidence: 'No redundancy mentioned for the central coordinator',
-            },
-            {
-                aspect: 'Timeline',
-                concern: 'Estimated timeline may be optimistic',
-                severity: 'minor',
-                evidence: 'Similar projects typically take 20-30% longer than initial estimates',
-            },
-        ];
-    }
+        const result = await this.llm.json<{
+            overall_assessment: string;
+            concerns: Concern[];
+            blind_spots: string[];
+            edge_cases: string[];
+            alternatives: Alternative[];
+            strengths: string[];
+            verdict: 'proceed' | 'proceed_with_changes' | 'reconsider' | 'reject';
+            verdict_rationale: string;
+        }>(prompt, {
+            system: SKEPTIC_SYSTEM_PROMPT,
+            temperature: 0.5, // Some creativity for finding issues
+            max_tokens: 4096,
+        });
 
-    private async generateAlternatives(
-        _inputs: string,
-        _context: AgentContext
-    ): Promise<Alternative[]> {
-        // TODO: Use LLM to generate alternative approaches
-
-        return [
-            {
-                name: 'Distributed Approach',
-                description: 'Use a distributed architecture instead of centralized',
-                advantages: [
-                    'Better fault tolerance',
-                    'Linear scalability',
-                    'No single point of failure',
-                ],
-                disadvantages: [
-                    'Higher complexity',
-                    'More difficult debugging',
-                    'Eventual consistency challenges',
-                ],
-                conditions: 'Better when high availability is critical and team has distributed systems experience',
-            },
-            {
-                name: 'Phased Rollout',
-                description: 'Implement in phases instead of big-bang release',
-                advantages: [
-                    'Lower risk',
-                    'Earlier feedback',
-                    'Easier rollback',
-                ],
-                disadvantages: [
-                    'Longer overall timeline',
-                    'May need temporary compatibility layers',
-                ],
-                conditions: 'Better when requirements are uncertain or when disruption must be minimized',
-            },
-        ];
-    }
-
-    private assessRisk(challenges: Challenge[]): {
-        level: 'low' | 'medium' | 'high';
-        summary: string;
-        mitigations: string[];
-    } {
-        const significantCount = challenges.filter(c => c.severity === 'significant').length;
-        const moderateCount = challenges.filter(c => c.severity === 'moderate').length;
-
-        let level: 'low' | 'medium' | 'high';
-        if (significantCount >= 2) {
-            level = 'high';
-        } else if (significantCount >= 1 || moderateCount >= 2) {
-            level = 'medium';
-        } else {
-            level = 'low';
+        if (result.data) {
+            return {
+                ...result.data,
+                tokens: result.raw.tokens_used.total,
+            };
         }
 
         return {
-            level,
-            summary: `Overall risk is ${level} based on ${significantCount} significant and ${moderateCount} moderate concerns`,
-            mitigations: [
-                'Address significant concerns before proceeding',
-                'Create contingency plans for moderate concerns',
-                'Consider alternative approaches for high-risk aspects',
-            ],
+            overall_assessment: 'Unable to complete critique.',
+            concerns: [],
+            blind_spots: [],
+            edge_cases: [],
+            alternatives: [],
+            strengths: [],
+            verdict: 'reconsider',
+            verdict_rationale: 'Critique could not be completed due to processing error.',
+            tokens: result.raw.tokens_used.total,
         };
     }
 }
