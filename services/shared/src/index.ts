@@ -11,3 +11,9 @@ export * from './redis/index.js';
 
 // Validation schemas
 export * from './validation/index.js';
+
+// Role Registry
+export * from './registry/index.js';
+
+// Contract Enforcement
+export * from './enforcement/index.js';

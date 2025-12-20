@@ -7,6 +7,15 @@
 export type { AgentType, ModelAssignment, AgentResponse, AgentRequest } from './agent.js';
 export { DEFAULT_AGENT_MODELS } from './agent.js';
 
+// Role types
+export type {
+    AgentCapability,
+    ApprovalRequirement,
+    RoleDefinition,
+} from './role.js';
+export { DEFAULT_ROLES } from './role.js';
+
+
 // Task types
 export type {
     TaskType,
