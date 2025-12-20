@@ -17,3 +17,9 @@ export * from './registry/index.js';
 
 // Contract Enforcement
 export * from './enforcement/index.js';
+
+// Tool System
+export * from './tools/index.js';
+
+// Robustness Features
+export * from './robustness/index.js';

@@ -14,8 +14,6 @@
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true,
-        "outDir": "./dist",
-        "rootDir": "./src",
         "noEmit": false,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
@@ -27,6 +25,7 @@
     "exclude": [
         "node_modules",
         "dist",
-        "**/*.test.ts"
+        "**/*.test.ts",
+        "services/**/*"
     ]
 }
