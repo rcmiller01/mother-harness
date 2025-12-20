@@ -1,15 +1,59 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
 # OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# IDE files
-.vscode/
-.idea/
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
 
 # Temporary files
 *.tmp
 *.temp
+.cache/
 
-# Large processed files (optional - remove if you want to track these)
-# processed/*.jpg
-# processed/*.png
+# Python (from earlier OCR work)
+.venv/
+__pycache__/
+*.pyc
+
+# Docker
+.docker/
+
+# Redis data (local development)
+redis_data/
+
+# Large files
+*.pdf
+*.zip
+*.tar.gz
+
+# Keep project documents but ignore large files elsewhere
+!project documents/*.pdf
