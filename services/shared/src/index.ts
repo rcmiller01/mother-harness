@@ -26,3 +26,12 @@ export * from './robustness/index.js';
 
 // Security
 export * from './security/index.js';
+
+// PKM (Personal Knowledge Management)
+export * from './pkm/index.js';
+
+// Templates
+export * from './templates/index.js';
+
+// Scheduler
+export * from './scheduler/index.js';

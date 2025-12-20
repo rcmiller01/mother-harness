@@ -114,14 +114,14 @@ describe('generateSecureToken', () => {
 
 describe('maskSensitiveData', () => {
     it('should mask password fields', () => {
-        const masked = maskSensitiveData({ password: 'secret123' });
-        expect(masked.password).not.toBe('secret123');
+        const masked = maskSensitiveData({ password: 'FAKE_TEST_SECRET' });
+        expect(masked.password).not.toBe('FAKE_TEST_SECRET');
         expect(masked.password).toContain('***');
     });
 
     it('should mask nested sensitive fields', () => {
         const masked = maskSensitiveData({
-            config: { api_key: 'abc123xyz' },
+            config: { api_key: 'FAKE_TEST_KEY' },
         });
         expect((masked.config as Record<string, string>).api_key).toContain('***');
     });
