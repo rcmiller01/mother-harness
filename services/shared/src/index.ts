@@ -35,3 +35,6 @@ export * from './templates/index.js';
 
 // Scheduler
 export * from './scheduler/index.js';
+
+// LLM Client
+export * from './llm/index.js';

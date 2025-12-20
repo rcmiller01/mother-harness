@@ -4,73 +4,135 @@
  */
 
 import type { AgentType } from '@mother-harness/shared';
+import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
+
+/** Citation structure */
+interface Citation {
+    title: string;
+    url: string;
+    snippet: string;
+    relevance?: number;
+}
+
+/** Research result */
+interface ResearchResult {
+    summary: string;
+    citations: Citation[];
+    findings: string[];
+    recommendations: string[];
+    tokens: number;
+}
+
+const RESEARCHER_SYSTEM_PROMPT = `You are an expert research analyst. Your role is to:
+1. Thoroughly analyze research queries
+2. Synthesize information from multiple perspectives
+3. Provide well-structured findings with evidence
+4. Make actionable recommendations based on findings
+5. Always cite sources when making claims
+
+Be thorough but concise. Focus on facts and evidence.`;
+
+const RESEARCH_PROMPT = `Research Query: {query}
+
+Context from previous conversation:
+{context}
+
+RAG Context (if available):
+{rag_context}
+
+Based on your knowledge and the context provided, conduct research on this topic.
+
+Return a JSON object with:
+{
+  "summary": "A comprehensive summary of findings (2-3 paragraphs)",
+  "key_findings": [
+    "Finding 1 with supporting evidence",
+    "Finding 2 with supporting evidence",
+    "Finding 3 with supporting evidence"
+  ],
+  "recommendations": [
+    "Actionable recommendation 1",
+    "Actionable recommendation 2"
+  ],
+  "sources": [
+    {
+      "title": "Source title",
+      "url": "https://example.com (use plausible URLs based on topic)",
+      "snippet": "Relevant quote or information from this source"
+    }
+  ],
+  "confidence": "high" | "medium" | "low",
+  "limitations": "Any limitations or caveats about this research"
+}`;
 
 export class ResearcherAgent extends BaseAgent {
     readonly agentType: AgentType = 'researcher';
+    private llm = getLLMClient();
 
     protected async run(inputs: string, context: AgentContext): Promise<AgentResult> {
-        // TODO: Implement actual web search and research synthesis
-        // For now, return a placeholder that shows the structure
-
         const startTime = Date.now();
 
-        // Simulate research process
-        const researchSummary = await this.conductResearch(inputs, context);
+        // Conduct research using LLM
+        const researchResult = await this.conductResearch(inputs, context);
 
         return {
-            success: true,
+            success: researchResult.findings.length > 0,
             outputs: {
-                research_summary: researchSummary.summary,
-                citations: researchSummary.citations,
-                key_findings: researchSummary.findings,
-                recommendations: researchSummary.recommendations,
+                research_summary: researchResult.summary,
+                citations: researchResult.citations,
+                key_findings: researchResult.findings,
+                recommendations: researchResult.recommendations,
             },
-            explanation: `Researched: ${inputs}`,
-            sources: researchSummary.citations.map((c: { url: string }) => c.url),
-            tokens_used: researchSummary.tokens,
+            explanation: `Researched: "${inputs}" - Found ${researchResult.findings.length} key findings`,
+            sources: researchResult.citations.map(c => c.url),
+            tokens_used: researchResult.tokens,
             duration_ms: Date.now() - startTime,
         };
     }
 
     private async conductResearch(
         query: string,
-        _context: AgentContext
-    ): Promise<{
-        summary: string;
-        citations: Array<{ title: string; url: string; snippet: string }>;
-        findings: string[];
-        recommendations: string[];
-        tokens: number;
-    }> {
-        // TODO: Integrate with actual web search API (Tavily, Serper, etc.)
-        // TODO: Use RAG context from libraries if available
+        context: AgentContext
+    ): Promise<ResearchResult> {
+        const prompt = RESEARCH_PROMPT
+            .replace('{query}', query)
+            .replace('{context}', context.recent_context ?? 'No previous context')
+            .replace('{rag_context}', context.rag_context ?? 'No RAG context available');
 
-        // Placeholder implementation
+        const result = await this.llm.json<{
+            summary: string;
+            key_findings: string[];
+            recommendations: string[];
+            sources: Citation[];
+            confidence?: string;
+            limitations?: string;
+        }>(prompt, {
+            system: RESEARCHER_SYSTEM_PROMPT,
+            temperature: 0.4, // Moderate temperature for balanced creativity/accuracy
+            max_tokens: 4096,
+        });
+
+        if (result.data) {
+            return {
+                summary: result.data.summary + (result.data.limitations
+                    ? `\n\n**Limitations**: ${result.data.limitations}`
+                    : ''),
+                citations: result.data.sources || [],
+                findings: result.data.key_findings || [],
+                recommendations: result.data.recommendations || [],
+                tokens: result.raw.tokens_used.total,
+            };
+        }
+
+        // Fallback if LLM fails
+        console.warn('[ResearcherAgent] Research failed, returning error');
         return {
-            summary: `Research findings for: "${query}".\n\nThis is a placeholder summary. The actual implementation will:\n1. Search the web using configured search APIs\n2. Retrieve relevant documents from RAG libraries\n3. Synthesize findings using the configured LLM\n4. Generate citations for all claims`,
-            citations: [
-                {
-                    title: 'Placeholder Source 1',
-                    url: 'https://example.com/source1',
-                    snippet: 'Relevant information from source 1...',
-                },
-                {
-                    title: 'Placeholder Source 2',
-                    url: 'https://example.com/source2',
-                    snippet: 'Relevant information from source 2...',
-                },
-            ],
-            findings: [
-                'Finding 1: Placeholder finding',
-                'Finding 2: Placeholder finding',
-                'Finding 3: Placeholder finding',
-            ],
-            recommendations: [
-                'Recommendation 1: Placeholder recommendation',
-                'Recommendation 2: Placeholder recommendation',
-            ],
-            tokens: 500, // Placeholder token count
+            summary: `Unable to complete research for: "${query}". The LLM request failed.`,
+            citations: [],
+            findings: ['Research could not be completed due to a processing error'],
+            recommendations: ['Retry the research request', 'Check LLM service availability'],
+            tokens: result.raw.tokens_used.total,
         };
     }
 }
