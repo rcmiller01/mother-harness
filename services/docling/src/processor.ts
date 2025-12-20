@@ -4,9 +4,10 @@
  */
 
 import type { DocumentChunk, Library, DoclingJob } from '@mother-harness/shared';
-import { getRedisJSON, getRedisClient } from '@mother-harness/shared';
+import { getRedisJSON, getLLMClient } from '@mother-harness/shared';
 import { nanoid } from 'nanoid';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
 
 /** Docling API configuration */
@@ -14,9 +15,10 @@ interface DoclingConfig {
     apiUrl: string;
     timeout: number;
     maxRetries: number;
+    embeddingModel: string;
 }
 
-/** Extraction result from Docling API */
+/** Extraction result from document processing */
 interface ExtractionResult {
     text: string;
     pages: Array<{
@@ -30,10 +32,12 @@ interface ExtractionResult {
         author?: string;
         created_date?: string;
         page_count: number;
+        file_type: string;
+        file_size: number;
     };
 }
 
-/** Chunk with embedding placeholder */
+/** Chunk with embedding */
 interface ProcessedChunk {
     content: string;
     page_number?: number;
@@ -45,7 +49,7 @@ interface ProcessedChunk {
 
 export class DocumentProcessor {
     private redis = getRedisJSON();
-    private redisClient = getRedisClient();
+    private llm = getLLMClient();
     private config: DoclingConfig;
 
     /** Chunking parameters */
@@ -53,11 +57,21 @@ export class DocumentProcessor {
     private readonly CHUNK_OVERLAP = 80;
     private readonly CHARS_PER_TOKEN = 4;
 
+    /** Supported file types */
+    private readonly SUPPORTED_EXTENSIONS = [
+        '.txt', '.md', '.markdown',
+        '.json', '.yaml', '.yml',
+        '.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h',
+        '.html', '.css', '.xml',
+        '.csv', '.tsv',
+    ];
+
     constructor(config?: Partial<DoclingConfig>) {
         this.config = {
             apiUrl: config?.apiUrl ?? process.env['DOCLING_API_URL'] ?? 'http://localhost:8000',
             timeout: config?.timeout ?? 300000, // 5 minutes
             maxRetries: config?.maxRetries ?? 3,
+            embeddingModel: config?.embeddingModel ?? 'nomic-embed-text',
         };
     }
 
@@ -77,11 +91,15 @@ export class DocumentProcessor {
             // Chunk the content
             const chunks = this.chunkDocument(extraction, job);
 
-            // Generate embeddings (placeholder - would call embedding API)
+            if (chunks.length === 0) {
+                throw new Error('No content extracted from document');
+            }
+
+            // Generate embeddings using LLM client
             const chunksWithEmbeddings = await this.generateEmbeddings(chunks);
 
             // Store chunks in Redis
-            await this.storeChunks(job.library_id, chunksWithEmbeddings);
+            await this.storeChunks(job.library_id, job.file_path, extraction, chunksWithEmbeddings);
 
             // Update library stats
             await this.updateLibraryStats(job.library_id, chunks.length);
@@ -92,6 +110,7 @@ export class DocumentProcessor {
                 duration_ms: Date.now() - startTime,
             });
 
+            console.log(`[Processor] Successfully processed ${job.file_path}: ${chunks.length} chunks`);
             return { success: true, chunks: chunks.length };
 
         } catch (error) {
@@ -100,7 +119,7 @@ export class DocumentProcessor {
             // Update job status to failed
             await this.updateJobStatus(job.id, 'failed', { error: errorMessage });
 
-            // Move file to _failed folder if max retries exceeded
+            // Handle failure (move to failed folder, alert)
             await this.handleFailure(job, errorMessage);
 
             return { success: false, chunks: 0, error: errorMessage };
@@ -108,103 +127,243 @@ export class DocumentProcessor {
     }
 
     /**
-     * Extract content from document using Docling API
+     * Extract content from document
      */
     private async extractDocument(filePath: string): Promise<ExtractionResult> {
-        // TODO: Implement actual Docling API call
-        // For now, return placeholder
+        const resolvedPath = path.resolve(filePath);
+        const extension = path.extname(filePath).toLowerCase();
+        const fileName = path.basename(filePath);
 
-        console.log(`[Processor] Would extract: ${filePath}`);
+        // Check if file exists
+        let stats: Awaited<ReturnType<typeof fs.stat>>;
+        try {
+            stats = await fs.stat(resolvedPath);
+        } catch {
+            throw new Error(`File not found: ${filePath}`);
+        }
 
-        return {
-            text: `Extracted content from ${path.basename(filePath)}`,
-            pages: [
-                {
+        // Check file size (max 10MB)
+        if (stats.size > 10 * 1024 * 1024) {
+            throw new Error('File too large (max 10MB)');
+        }
+
+        // For text-based files, read directly
+        if (this.SUPPORTED_EXTENSIONS.includes(extension)) {
+            const content = await fs.readFile(resolvedPath, 'utf-8');
+
+            return {
+                text: content,
+                pages: [{
                     page_number: 1,
-                    content: 'Page 1 content...',
+                    content: content,
+                }],
+                metadata: {
+                    title: path.basename(filePath, extension),
+                    page_count: 1,
+                    file_type: extension.slice(1),
+                    file_size: stats.size,
                 },
-            ],
-            metadata: {
-                title: path.basename(filePath, path.extname(filePath)),
-                page_count: 1,
-            },
-        };
+            };
+        }
+
+        // For PDFs and other binary formats, try Docling API
+        if (extension === '.pdf') {
+            return this.extractWithDoclingApi(resolvedPath, stats);
+        }
+
+        // Fallback: try to read as text
+        try {
+            const content = await fs.readFile(resolvedPath, 'utf-8');
+            return {
+                text: content,
+                pages: [{ page_number: 1, content }],
+                metadata: {
+                    title: path.basename(filePath, extension),
+                    page_count: 1,
+                    file_type: extension.slice(1) || 'unknown',
+                    file_size: stats.size,
+                },
+            };
+        } catch {
+            throw new Error(`Unsupported file type: ${extension}`);
+        }
     }
 
     /**
-     * Chunk document content
+     * Extract PDF using Docling API
      */
-    private chunkDocument(extraction: ExtractionResult, job: DoclingJob): ProcessedChunk[] {
+    private async extractWithDoclingApi(
+        filePath: string,
+        stats: Awaited<ReturnType<typeof fs.stat>>
+    ): Promise<ExtractionResult> {
+        try {
+            const fileBuffer = await fs.readFile(filePath);
+            const formData = new FormData();
+            formData.append('file', new Blob([fileBuffer]), path.basename(filePath));
+
+            const response = await fetch(`${this.config.apiUrl}/convert`, {
+                method: 'POST',
+                body: formData,
+                signal: AbortSignal.timeout(this.config.timeout),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Docling API error: ${response.status}`);
+            }
+
+            const result = await response.json() as {
+                pages?: Array<{ text: string; tables?: Array<{ content: string }> }>;
+                metadata?: { title?: string; author?: string };
+            };
+
+            const pages = (result.pages ?? []).map((p, i) => ({
+                page_number: i + 1,
+                content: p.text ?? '',
+                tables: p.tables?.map(t => ({ content: t.content })),
+            }));
+
+            return {
+                text: pages.map(p => p.content).join('\n\n'),
+                pages,
+                metadata: {
+                    title: result.metadata?.title ?? path.basename(filePath, '.pdf'),
+                    author: result.metadata?.author,
+                    page_count: pages.length,
+                    file_type: 'pdf',
+                    file_size: stats.size,
+                },
+            };
+        } catch (error) {
+            // If Docling API fails, throw error
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            throw new Error(`PDF extraction failed: ${message}. Ensure Docling API is running.`);
+        }
+    }
+
+    /**
+     * Chunk document content using overlapping windows
+     */
+    private chunkDocument(extraction: ExtractionResult, _job: DoclingJob): ProcessedChunk[] {
         const chunks: ProcessedChunk[] = [];
         const chunkSize = this.CHUNK_SIZE * this.CHARS_PER_TOKEN;
         const overlap = this.CHUNK_OVERLAP * this.CHARS_PER_TOKEN;
 
-        // Process each page
         for (const page of extraction.pages) {
-            const content = page.content;
-            let startIndex = 0;
+            const content = page.content.trim();
+            if (!content) continue;
 
-            while (startIndex < content.length) {
-                const endIndex = Math.min(startIndex + chunkSize, content.length);
-                const chunkContent = content.slice(startIndex, endIndex);
+            // Split by paragraphs first for better semantic boundaries
+            const paragraphs = content.split(/\n\n+/);
+            let buffer = '';
 
-                chunks.push({
-                    content: chunkContent,
-                    page_number: page.page_number,
-                    hierarchy: extraction.metadata.title ? [extraction.metadata.title] : [],
-                    images: (page.images ?? []).map(img => ({
-                        id: `img-${nanoid()}`,
-                        file_path: img.path,
-                        caption: img.caption,
-                        page_number: page.page_number,
-                    })),
-                    tables: (page.tables ?? []).map(tbl => ({
-                        id: `tbl-${nanoid()}`,
-                        content: tbl.content,
-                        caption: tbl.caption,
-                        page_number: page.page_number,
-                    })),
-                });
+            for (const para of paragraphs) {
+                if (buffer.length + para.length < chunkSize) {
+                    buffer += (buffer ? '\n\n' : '') + para;
+                } else {
+                    // Save current buffer as chunk
+                    if (buffer.trim()) {
+                        chunks.push(this.createChunk(buffer, page, extraction));
+                    }
 
-                // Move start with overlap
-                startIndex = endIndex - overlap;
-                if (startIndex >= content.length - overlap) break;
+                    // Start new buffer with overlap from previous
+                    const overlapText = buffer.slice(-overlap);
+                    buffer = overlapText + (overlapText ? '\n\n' : '') + para;
+                }
+            }
+
+            // Don't forget the last buffer
+            if (buffer.trim()) {
+                chunks.push(this.createChunk(buffer, page, extraction));
             }
         }
 
         return chunks;
     }
 
+    private createChunk(
+        content: string,
+        page: ExtractionResult['pages'][0],
+        extraction: ExtractionResult
+    ): ProcessedChunk {
+        return {
+            content,
+            page_number: page.page_number,
+            hierarchy: extraction.metadata.title ? [extraction.metadata.title] : [],
+            images: (page.images ?? []).map(img => ({
+                id: `img-${nanoid()}`,
+                file_path: img.path,
+                caption: img.caption,
+                page_number: page.page_number,
+            })),
+            tables: (page.tables ?? []).map(tbl => ({
+                id: `tbl-${nanoid()}`,
+                content: tbl.content,
+                caption: tbl.caption,
+                page_number: page.page_number,
+            })),
+        };
+    }
+
     /**
-     * Generate embeddings for chunks
+     * Generate embeddings for chunks using LLM client
      */
     private async generateEmbeddings(
         chunks: ProcessedChunk[]
     ): Promise<Array<ProcessedChunk & { embedding: number[] }>> {
-        // TODO: Call actual embedding API (Ollama or cloud)
-        // For now, generate zero vectors as placeholders
+        const results: Array<ProcessedChunk & { embedding: number[] }> = [];
 
-        return chunks.map(chunk => ({
-            ...chunk,
-            embedding: new Array(768).fill(0), // 768-dim placeholder
-        }));
+        // Process in batches of 10
+        const batchSize = 10;
+        for (let i = 0; i < chunks.length; i += batchSize) {
+            const batch = chunks.slice(i, i + batchSize);
+            const texts = batch.map(c => c.content);
+
+            try {
+                const embedResult = await this.llm.embed(texts, this.config.embeddingModel);
+
+                for (let j = 0; j < batch.length; j++) {
+                    results.push({
+                        ...batch[j]!,
+                        embedding: embedResult.embeddings[j] ?? new Array(768).fill(0),
+                    });
+                }
+            } catch (error) {
+                console.error('[Processor] Embedding generation failed:', error);
+                // Use zero vectors as fallback
+                for (const chunk of batch) {
+                    results.push({
+                        ...chunk,
+                        embedding: new Array(768).fill(0),
+                    });
+                }
+            }
+        }
+
+        return results;
     }
 
     /**
-     * Store chunks in Redis
+     * Store chunks in Redis with proper indexing
      */
     private async storeChunks(
         libraryId: string,
+        filePath: string,
+        extraction: ExtractionResult,
         chunks: Array<ProcessedChunk & { embedding: number[] }>
     ): Promise<void> {
-        for (const chunk of chunks) {
+        const documentId = `doc-${nanoid()}`;
+        const contentHash = this.hashContent(extraction.text);
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i]!;
             const chunkId = `chunk-${nanoid()}`;
+
             const docChunk: DocumentChunk = {
                 id: chunkId,
                 library: libraryId,
-                document_id: `doc-${nanoid()}`,
-                document_name: 'Processed Document',
-                file_path: '',
+                document_id: documentId,
+                document_name: extraction.metadata.title ?? path.basename(filePath),
+                file_path: filePath,
                 content: chunk.content,
                 embedding: chunk.embedding,
                 images: chunk.images,
@@ -213,24 +372,47 @@ export class DocumentProcessor {
                 section_title: chunk.section_title,
                 hierarchy: chunk.hierarchy,
                 chunk_type: 'text',
+                chunk_index: i,
+                total_chunks: chunks.length,
+                content_hash: contentHash,
                 indexed_at: new Date().toISOString(),
                 source_modified_at: new Date().toISOString(),
                 searchable: chunk.embedding.some(v => v !== 0),
             };
 
-            await this.redis.set(`doc:${chunkId}`, '$', docChunk);
+            // Store chunk
+            await this.redis.set(`chunk:${libraryId}:${chunkId}`, '$', docChunk);
         }
+
+        // Store document metadata
+        await this.redis.set(`document:${documentId}`, '$', {
+            id: documentId,
+            library_id: libraryId,
+            file_path: filePath,
+            title: extraction.metadata.title,
+            author: extraction.metadata.author,
+            file_type: extraction.metadata.file_type,
+            file_size: extraction.metadata.file_size,
+            page_count: extraction.metadata.page_count,
+            chunk_count: chunks.length,
+            content_hash: contentHash,
+            indexed_at: new Date().toISOString(),
+        });
     }
 
     /**
      * Update library statistics
      */
     private async updateLibraryStats(libraryId: string, newChunks: number): Promise<void> {
-        const library = await this.redis.get<Library>(`library:${libraryId}`);
-        if (library) {
-            const updatedCount = library.document_count + 1;
-            await this.redis.set(`library:${libraryId}`, '$.document_count', updatedCount);
-            await this.redis.set(`library:${libraryId}`, '$.last_scanned', new Date().toISOString());
+        try {
+            const library = await this.redis.get(`library:${libraryId}`) as Library | null;
+            if (library) {
+                await this.redis.set(`library:${libraryId}`, '$.document_count', library.document_count + 1);
+                await this.redis.set(`library:${libraryId}`, '$.chunk_count', library.chunk_count + newChunks);
+                await this.redis.set(`library:${libraryId}`, '$.last_scanned', new Date().toISOString());
+            }
+        } catch (error) {
+            console.warn('[Processor] Failed to update library stats:', error);
         }
     }
 
@@ -243,11 +425,17 @@ export class DocumentProcessor {
         metadata?: Record<string, unknown>
     ): Promise<void> {
         const key = `docling_job:${jobId}`;
-        await this.redis.set(key, '$.status', status);
-        if (metadata) {
-            for (const [k, v] of Object.entries(metadata)) {
-                await this.redis.set(key, `$.${k}`, v);
+        try {
+            await this.redis.set(key, '$.status', status);
+            await this.redis.set(key, '$.updated_at', new Date().toISOString());
+
+            if (metadata) {
+                for (const [k, v] of Object.entries(metadata)) {
+                    await this.redis.set(key, `$.${k}`, v);
+                }
             }
+        } catch (error) {
+            console.warn('[Processor] Failed to update job status:', error);
         }
     }
 
@@ -255,11 +443,24 @@ export class DocumentProcessor {
      * Handle processing failure
      */
     private async handleFailure(job: DoclingJob, error: string): Promise<void> {
-        // Log the failure
         console.error(`[Processor] Job ${job.id} failed: ${error}`);
 
-        // TODO: Move file to _failed folder if max retries exceeded
-        // TODO: Send alert if configured
+        // Move file to _failed folder if it exists
+        try {
+            const failedDir = path.join(path.dirname(job.file_path), '_failed');
+            await fs.mkdir(failedDir, { recursive: true });
+
+            const failedPath = path.join(failedDir, path.basename(job.file_path));
+            await fs.rename(job.file_path, failedPath);
+
+            // Write error log
+            const logPath = failedPath + '.error.txt';
+            await fs.writeFile(logPath, `Error: ${error}\nTimestamp: ${new Date().toISOString()}\nJob ID: ${job.id}`);
+
+            console.log(`[Processor] Moved failed file to: ${failedPath}`);
+        } catch (moveError) {
+            console.warn('[Processor] Could not move failed file:', moveError);
+        }
     }
 
     /**
