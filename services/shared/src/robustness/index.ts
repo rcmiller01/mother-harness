@@ -16,3 +16,12 @@ export {
     ArtifactGarbageCollector,
     getArtifactGC,
 } from './gc.js';
+
+export {
+    type AlertSeverity,
+    type AlertCategory,
+    type AlertRecord,
+    AlertManager,
+    getAlertManager,
+} from './alert-manager.js';
+
