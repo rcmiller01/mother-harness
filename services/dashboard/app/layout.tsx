@@ -1,4 +1,5 @@
 import React from 'react';
+import { AuthProvider } from '../lib/auth';
 
 export default function RootLayout({
     children,
@@ -11,7 +12,9 @@ export default function RootLayout({
                 <title>Mother-Harness</title>
                 <meta name="description" content="Multi-agent orchestration dashboard" />
             </head>
-            <body>{children}</body>
+            <body>
+                <AuthProvider>{children}</AuthProvider>
+            </body>
         </html>
     );
 }

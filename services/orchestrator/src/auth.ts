@@ -92,14 +92,35 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
 }
 
 /**
- * Validate JWT token
+ * Validate JWT token with HMAC-SHA256 signature verification
  */
 async function validateJWT(token: string, secret: string): Promise<UserSession | null> {
     try {
-        // Simple JWT validation (in production, use jsonwebtoken library)
-        const [headerB64, payloadB64, signature] = token.split('.');
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+            return null;
+        }
 
-        if (!headerB64 || !payloadB64 || !signature) {
+        const [headerB64, payloadB64, signatureB64] = parts;
+        if (!headerB64 || !payloadB64 || !signatureB64) {
+            return null;
+        }
+
+        // Verify signature using HMAC-SHA256
+        const { createHmac } = await import('crypto');
+        const signatureInput = `${headerB64}.${payloadB64}`;
+        const expectedSignature = createHmac('sha256', secret)
+            .update(signatureInput)
+            .digest('base64url');
+
+        // Timing-safe comparison to prevent timing attacks
+        const { timingSafeEqual } = await import('crypto');
+        const sigBuffer = Buffer.from(signatureB64, 'base64url');
+        const expectedBuffer = Buffer.from(expectedSignature, 'base64url');
+
+        if (sigBuffer.length !== expectedBuffer.length ||
+            !timingSafeEqual(sigBuffer, expectedBuffer)) {
+            console.warn('[Auth] JWT signature verification failed');
             return null;
         }
 
@@ -109,22 +130,28 @@ async function validateJWT(token: string, secret: string): Promise<UserSession |
         ) as JWTPayload;
 
         // Check expiration
-        if (payload.exp && payload.exp < Date.now() / 1000) {
+        const now = Date.now() / 1000;
+        if (payload.exp && payload.exp < now) {
+            console.warn('[Auth] JWT token expired');
             return null;
         }
 
-        // TODO: Verify signature with secret
-        // For now, trust the payload structure
+        // Check not-before (nbf) if present
+        if (payload.iat && payload.iat > now + 60) { // 60s clock skew tolerance
+            console.warn('[Auth] JWT token not yet valid');
+            return null;
+        }
 
         return {
             user_id: payload.sub,
             email: payload.email,
             name: payload.name,
-            roles: payload.roles,
-            created_at: new Date(payload.iat * 1000).toISOString(),
+            roles: payload.roles ?? ['user'],
+            created_at: new Date((payload.iat ?? 0) * 1000).toISOString(),
             last_activity: new Date().toISOString(),
         };
-    } catch {
+    } catch (error) {
+        console.error('[Auth] JWT validation error:', error);
         return null;
     }
 }
