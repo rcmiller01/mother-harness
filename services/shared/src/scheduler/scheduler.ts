@@ -76,7 +76,7 @@ export class Scheduler {
         }
     ): Promise<ScheduledTask> {
         const now = new Date().toISOString();
-        const nextRun = this.calculateNextRun(data);
+        const nextRun = await this.calculateNextRun(data);
 
         const task: ScheduledTask = {
             id: `sched-${nanoid()}`,
@@ -126,7 +126,7 @@ export class Scheduler {
 
         if (enabled) {
             // Recalculate next run
-            task.next_run_at = this.calculateNextRun(task);
+            task.next_run_at = await this.calculateNextRun(task);
             await this.redisClient.zadd(this.queueKey, new Date(task.next_run_at).getTime(), taskId);
         } else {
             // Remove from queue
@@ -159,7 +159,7 @@ export class Scheduler {
             await this.redisClient.zrem(this.queueKey, taskId);
         } else if (task.schedule_type !== 'once') {
             // Schedule next run
-            task.next_run_at = this.calculateNextRun(task);
+            task.next_run_at = await this.calculateNextRun(task);
             await this.redisClient.zadd(this.queueKey, new Date(task.next_run_at).getTime(), taskId);
         } else {
             // One-time task, disable
@@ -216,13 +216,13 @@ export class Scheduler {
     /**
      * Calculate next run time
      */
-    private calculateNextRun(config: {
+    private async calculateNextRun(config: {
         schedule_type: ScheduleType;
         cron_expression?: string;
         interval_ms?: number;
         run_at?: string;
         last_run_at?: string;
-    }): string {
+    }): Promise<string> {
         const now = new Date();
 
         switch (config.schedule_type) {
@@ -237,8 +237,18 @@ export class Scheduler {
                 return now.toISOString();
 
             case 'cron':
-                // TODO: Implement cron parsing
-                // For now, default to 1 hour from now
+                if (config.cron_expression) {
+                    try {
+                        // Dynamic import to avoid circular dependencies
+                        const { parseCron, getNextCronRun } = await import('./cron-parser.js');
+                        const parsed = parseCron(config.cron_expression);
+                        return getNextCronRun(parsed, now).toISOString();
+                    } catch (error) {
+                        console.error('[Scheduler] Failed to parse cron:', error);
+                        // Fallback to 1 hour from now
+                        return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+                    }
+                }
                 return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
 
             default:

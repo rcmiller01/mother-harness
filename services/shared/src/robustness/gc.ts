@@ -174,14 +174,83 @@ export class ArtifactGarbageCollector {
     }
 
     /**
-     * Archive an artifact
+     * Archive an artifact using gzip compression
      */
     private async archiveArtifact(metadata: ArtifactMetadata): Promise<void> {
-        // TODO: Implement actual archival (compress and move to S3/storage)
         const key = `${this.metadataPrefix}${metadata.id}`;
-        await this.redisJson.set(key, '$.archived', true);
-        await this.redisJson.set(key, '$.archive_path', `/archives/${metadata.id}.gz`);
-        console.log(`[GC] Archived artifact: ${metadata.id}`);
+
+        try {
+            // Get the artifact data
+            const artifactData = await this.redisJson.get(`artifact:${metadata.id}`);
+
+            if (artifactData) {
+                // Compress the data using gzip
+                const { gzipSync } = await import('zlib');
+                const jsonData = JSON.stringify(artifactData);
+                const compressed = gzipSync(Buffer.from(jsonData, 'utf-8'));
+
+                // Store compressed data with archive prefix
+                const archivePath = `archive:${metadata.id}`;
+                await this.redis.setex(
+                    archivePath,
+                    365 * 24 * 60 * 60, // 1 year retention for archives
+                    compressed.toString('base64')
+                );
+
+                // Delete original artifact data (keep metadata)
+                await this.redisJson.del(`artifact:${metadata.id}`);
+
+                // Update metadata
+                await this.redisJson.set(key, '$.archived', true);
+                await this.redisJson.set(key, '$.archive_path', archivePath);
+                await this.redisJson.set(key, '$.archived_at', new Date().toISOString());
+
+                console.log(`[GC] Archived artifact: ${metadata.id} (${compressed.length} bytes compressed)`);
+            }
+        } catch (error) {
+            console.error(`[GC] Failed to archive artifact ${metadata.id}:`, error);
+        }
+    }
+
+    /**
+     * Restore an archived artifact
+     */
+    async restoreArtifact(artifactId: string): Promise<unknown | null> {
+        const key = `${this.metadataPrefix}${artifactId}`;
+        const metadata = await this.redisJson.get<ArtifactMetadata>(key);
+
+        if (!metadata?.archived || !metadata.archive_path) {
+            return null;
+        }
+
+        try {
+            // Get compressed data
+            const compressedBase64 = await this.redis.get(metadata.archive_path);
+            if (!compressedBase64) return null;
+
+            // Decompress
+            const { gunzipSync } = await import('zlib');
+            const compressed = Buffer.from(compressedBase64, 'base64');
+            const jsonData = gunzipSync(compressed).toString('utf-8');
+            const data = JSON.parse(jsonData);
+
+            // Restore artifact
+            await this.redisJson.set(`artifact:${artifactId}`, '$', data);
+
+            // Update metadata
+            await this.redisJson.set(key, '$.archived', false);
+            await this.redisJson.set(key, '$.archive_path', null);
+            await this.redisJson.set(key, '$.restored_at', new Date().toISOString());
+
+            // Delete archive
+            await this.redis.del(metadata.archive_path);
+
+            console.log(`[GC] Restored artifact: ${artifactId}`);
+            return data;
+        } catch (error) {
+            console.error(`[GC] Failed to restore artifact ${artifactId}:`, error);
+            return null;
+        }
     }
 
     /**

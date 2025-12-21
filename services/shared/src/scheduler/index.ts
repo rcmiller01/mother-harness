@@ -16,3 +16,13 @@ export {
     FocusModeManager,
     getFocusModeManager,
 } from './focus-mode.js';
+
+export {
+    type ParsedCron,
+    parseCron,
+    getNextCronRun,
+    matchesCron,
+    describeCron,
+    CRON_PRESETS,
+} from './cron-parser.js';
+
