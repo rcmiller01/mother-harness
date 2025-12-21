@@ -226,7 +226,7 @@ export class ResourceBudgetGuard {
     }
 
     /**
-     * Send warning (placeholder)
+     * Send warning using AlertManager
      */
     private async sendWarning(
         scope: BudgetScope,
@@ -234,10 +234,17 @@ export class ResourceBudgetGuard {
         resource: ResourceType,
         usagePercent: number
     ): Promise<void> {
-        console.warn(
-            `[BudgetGuard] Warning: ${scope}:${scopeId} - ${resource} at ${Math.round(usagePercent * 100)}%`
+        const { getAlertManager } = await import('./alert-manager.js');
+        const alert = getAlertManager();
+
+        const percentStr = Math.round(usagePercent * 100);
+        await alert.sendAlert(
+            'warning',
+            'budget',
+            `Resource limit warning: ${resource}`,
+            `${scope}:${scopeId} has reached ${percentStr}% of ${resource} budget`,
+            { scope, scopeId, resource, usagePercent: percentStr }
         );
-        // TODO: Implement actual notification (webhook, email, etc.)
     }
 
     /**

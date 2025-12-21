@@ -163,11 +163,12 @@ export class PKMManager {
     ): Promise<PKMSearchResult[]> {
         const limit = options.limit ?? 20;
 
-        // TODO: Use RediSearch for full-text search
-        // For now, simple filtering
+        // Note: When RediSearch is configured, this should use FT.SEARCH for full-text search
+        // For now, using in-memory search with TF-IDF-like scoring
 
         const keys = await this.redis.keys(`${this.notePrefix}*`);
         const results: PKMSearchResult[] = [];
+        const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
 
         for (const key of keys) {
             const note = await this.redis.get<PKMNote>(key);
@@ -185,15 +186,30 @@ export class PKMManager {
                 if (!hasTags) continue;
             }
 
-            // Search in title and content
-            const lowerQuery = query.toLowerCase();
-            const titleMatch = note.title.toLowerCase().includes(lowerQuery);
-            const contentMatch = note.content.toLowerCase().includes(lowerQuery);
+            // TF-IDF-like scoring
+            let score = 0;
+            const lowerTitle = note.title.toLowerCase();
+            const lowerContent = note.content.toLowerCase();
 
-            if (titleMatch || contentMatch) {
+            for (const term of queryTerms) {
+                // Title matches score higher
+                if (lowerTitle.includes(term)) score += 3;
+                // Content matches
+                const contentMatches = (lowerContent.match(new RegExp(term, 'gi')) || []).length;
+                score += Math.min(contentMatches, 5); // Cap contribution per term
+            }
+
+            // Boost starred notes
+            if (note.starred) score *= 1.2;
+
+            // Boost recently accessed
+            const daysSinceAccess = (Date.now() - new Date(note.accessed_at).getTime()) / (1000 * 60 * 60 * 24);
+            if (daysSinceAccess < 7) score *= 1.1;
+
+            if (score > 0) {
                 results.push({
                     note,
-                    score: titleMatch ? 2 : 1,
+                    score,
                     highlights: this.extractHighlights(note.content, query),
                 });
             }

@@ -112,14 +112,18 @@ export class CostTracker {
     }
 
     /**
-     * Send budget alert
+     * Send budget alert using AlertManager
      */
     private async sendBudgetAlert(userId: string, status: BudgetStatus): Promise<void> {
-        // TODO: Implement actual alerting (webhook, email, etc.)
-        console.log(`[CostTracker] Budget alert for user ${userId}:`, {
-            daily: status.daily_warning ? `$${status.daily_spend.toFixed(2)}/$${BUDGETS.daily.limit}` : 'OK',
-            monthly: status.monthly_warning ? `$${status.monthly_spend.toFixed(2)}/$${BUDGETS.monthly.limit}` : 'OK',
-        });
+        const { getAlertManager } = await import('@mother-harness/shared');
+        const alert = getAlertManager();
+
+        if (status.daily_warning) {
+            await alert.budgetWarning(userId, status.daily_spend, BUDGETS.daily.limit, 'daily');
+        }
+        if (status.monthly_warning) {
+            await alert.budgetWarning(userId, status.monthly_spend, BUDGETS.monthly.limit, 'monthly');
+        }
     }
 
     /**

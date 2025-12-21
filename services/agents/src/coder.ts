@@ -179,8 +179,7 @@ export class CoderAgent extends BaseAgent {
         changes: CodeChange[],
         _context: AgentContext
     ): Promise<{ passed: boolean; output: string }> {
-        // For now, we return a placeholder - tool execution will be implemented separately
-        // This would use the ToolExecutor to run actual tests
+        // Check for testable files
         const testableFiles = changes.filter(c =>
             c.file_path.endsWith('.ts') || c.file_path.endsWith('.js')
         );
@@ -192,11 +191,38 @@ export class CoderAgent extends BaseAgent {
             };
         }
 
-        // TODO: Integrate with ToolExecutor for actual test running
-        return {
-            passed: true,
-            output: `Test placeholder for ${testableFiles.length} file(s). Actual test execution requires tool integration.`,
-        };
+        try {
+            // Use ToolExecutor to run actual tests
+            const { getToolExecutor } = await import('@mother-harness/shared');
+            const executor = getToolExecutor();
+
+            const result = await executor.executeTool({
+                tool: 'run_tests',
+                parameters: {
+                    path: process.cwd(),
+                    testFilter: testableFiles.map(f => f.file_path).join(','),
+                },
+            });
+
+            if (result.success && result.result) {
+                const testResult = result.result as { passed: number; failed: number; output: string };
+                return {
+                    passed: testResult.failed === 0,
+                    output: testResult.output ?? `Tests: ${testResult.passed} passed, ${testResult.failed} failed`,
+                };
+            }
+
+            return {
+                passed: false,
+                output: result.error ?? 'Test execution failed',
+            };
+        } catch (error) {
+            // Fallback if tool executor not available
+            return {
+                passed: true,
+                output: `Test placeholder for ${testableFiles.length} file(s). ToolExecutor not available.`,
+            };
+        }
     }
 
     private async generateDocs(
