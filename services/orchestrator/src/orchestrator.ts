@@ -26,7 +26,9 @@ import {
     ApprovalSchema,
     RunSchema,
     LibrarySchema,
+    type AgentRequest,
 } from '@mother-harness/shared';
+import { createAgent, type AgentContext as AgentExecutionContext } from '@mother-harness/agents';
 import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
 import { Tier2Memory } from './memory/tier2-summaries.js';
@@ -50,6 +52,62 @@ type AgentExecutor = (inputs: string, context: Record<string, unknown>) => Promi
 
 /** Registered agent executors */
 const agentExecutors: Map<AgentType, AgentExecutor> = new Map();
+const localAgentExecutors: Map<AgentType, AgentExecutor> = new Map();
+
+function normalizeAgentOutputs(result: unknown): Record<string, unknown> {
+    if (typeof result === 'object' && result !== null) {
+        return result as Record<string, unknown>;
+    }
+
+    return { result };
+}
+
+function agentResultHasError(result: Record<string, unknown>): boolean {
+    const errorValue = result['error'];
+    return typeof errorValue === 'string' && errorValue.length > 0;
+}
+
+function getLocalAgentExecutor(agentType: AgentType): AgentExecutor {
+    const cached = localAgentExecutors.get(agentType);
+    if (cached) return cached;
+
+    const executor: AgentExecutor = async (inputs, context) => {
+        const agent = createAgent(agentType);
+        const agentContext: AgentExecutionContext = {
+            task_id: String(context.task_id ?? ''),
+            step_id: String(context.step_id ?? ''),
+            project_id: String(context.project_id ?? ''),
+            user_id: String(context.user_id ?? ''),
+            recent_context: typeof context.recent_context === 'string' ? context.recent_context : undefined,
+            rag_context: typeof context.rag_context === 'string' ? context.rag_context : undefined,
+            library_ids: Array.isArray(context.library_ids)
+                ? context.library_ids.filter((id): id is string => typeof id === 'string')
+                : undefined,
+        };
+        const request: AgentRequest = {
+            task_id: agentContext.task_id,
+            step_id: agentContext.step_id,
+            agent: agentType,
+            inputs,
+            context,
+        };
+        const response = await agent.execute(request, agentContext);
+        const outputs = normalizeAgentOutputs(response.result);
+
+        return {
+            success: !agentResultHasError(outputs),
+            outputs,
+            artifacts: response.artifacts,
+            explanation: response.explanation,
+            tokens_used: response.tokens_used,
+            duration_ms: response.duration_ms,
+            model_used: response.model_used,
+        };
+    };
+
+    localAgentExecutors.set(agentType, executor);
+    return executor;
+}
 
 /**
  * Register an agent executor
@@ -573,7 +631,6 @@ export class Orchestrator {
      * Execute a single step by dispatching to the appropriate agent
      */
     private async executeStep(task: Task, step: TodoItem): Promise<AgentResult> {
-        const executor = agentExecutors.get(step.agent);
         const contract = await this.registry.getContract(step.agent);
 
         if (!contract) {
@@ -619,14 +676,6 @@ export class Orchestrator {
 
         if (workflowResult.success) {
             return this.normalizeWorkflowResult(step, workflowResult);
-        }
-
-        if (!executor) {
-            console.warn(`No executor registered for agent: ${step.agent}`);
-            throw new Error(
-                workflowResult.error?.message
-                    ?? `Workflow failed and no executor registered for agent: ${step.agent}`
-            );
         }
 
         // Execute the agent directly

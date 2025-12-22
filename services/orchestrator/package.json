@@ -15,6 +15,7 @@
         "test:integration": "vitest run --config vitest.integration.config.ts"
     },
     "dependencies": {
+        "@mother-harness/agents": "workspace:*",
         "@mother-harness/shared": "workspace:*",
         "fastify": "^4.25.0",
         "@fastify/cors": "^8.5.0",
