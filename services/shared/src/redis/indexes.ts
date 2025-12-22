@@ -12,13 +12,17 @@ export const INDEX_DEFINITIONS = {
      * Document chunks index for vector similarity search
      * Supports: semantic search, library filtering, chunk type filtering
      */
-    'idx:documents': `
-    FT.CREATE idx:documents ON JSON PREFIX 1 doc:
+    'idx:chunks': `
+    FT.CREATE idx:chunks ON JSON PREFIX 1 chunk:
     SCHEMA
       $.embedding AS embedding VECTOR FLAT 6 DIM 768 DISTANCE_METRIC COSINE
       $.library AS library TAG
       $.document_id AS document_id TAG
+      $.document_name AS document_name TEXT
+      $.file_path AS file_path TEXT
       $.chunk_type AS chunk_type TAG
+      $.chunk_index AS chunk_index NUMERIC SORTABLE
+      $.page_number AS page_number NUMERIC SORTABLE
       $.section_title AS section_title TEXT
       $.content AS content TEXT
       $.searchable AS searchable TAG

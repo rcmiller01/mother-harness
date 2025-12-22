@@ -3,8 +3,8 @@
  * Retrieval-Augmented Generation - answers questions using embedded documents
  */
 
-import type { AgentType } from '@mother-harness/shared';
-import { getLLMClient, getRedisJSON } from '@mother-harness/shared';
+import type { AgentType, RetrievalChunkSummary, RetrievalReport } from '@mother-harness/shared';
+import { getLLMClient, getRedisClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
 /** Retrieved chunk */
@@ -48,7 +48,11 @@ Return a JSON object:
 export class RAGAgent extends BaseAgent {
     readonly agentType: AgentType = 'rag';
     private llm = getLLMClient();
-    private redis = getRedisJSON();
+    private redisClient = getRedisClient();
+
+    private readonly QUERY_CHUNK_SIZE = 1200;
+    private readonly QUERY_CHUNK_OVERLAP = 200;
+    private readonly DEFAULT_TOP_K = 8;
 
     protected async run(inputs: string, context: AgentContext): Promise<AgentResult> {
         const startTime = Date.now();
@@ -56,6 +60,7 @@ export class RAGAgent extends BaseAgent {
 
         // Retrieve relevant chunks from the knowledge base
         const chunks = await this.retrieveChunks(inputs, context.library_ids ?? []);
+        const retrievalReport = await this.buildRetrievalReport(inputs, context.library_ids ?? [], chunks);
 
         // Generate answer using retrieved context
         const answer = await this.generateAnswer(inputs, chunks, context);
@@ -70,6 +75,7 @@ export class RAGAgent extends BaseAgent {
                 reasoning: answer.reasoning,
                 related_topics: answer.related_topics,
                 chunks_retrieved: chunks.length,
+                retrieval_report: retrievalReport,
             },
             explanation: answer.context_sufficient
                 ? `Answered using ${answer.sources_used.length} sources (${answer.confidence} confidence)`
@@ -84,74 +90,38 @@ export class RAGAgent extends BaseAgent {
         query: string,
         libraryIds: string[]
     ): Promise<RetrievedChunk[]> {
-        // Generate embedding for the query
-        const queryEmbedding = await this.llm.embed(query);
+        const queryChunks = this.chunkQuery(query);
+        if (queryChunks.length === 0) {
+            return [];
+        }
+        const queryEmbedding = await this.llm.embed(queryChunks);
 
         if (queryEmbedding.embeddings.length === 0 ||
-            queryEmbedding.embeddings[0]?.every(v => v === 0)) {
+            queryEmbedding.embeddings.every(vec => vec.every(v => v === 0))) {
             console.warn('[RAGAgent] Failed to generate query embedding');
             return [];
         }
 
-        const chunks: RetrievedChunk[] = [];
+        const retrieved = await this.searchEmbeddings(
+            queryEmbedding.embeddings,
+            libraryIds,
+            this.DEFAULT_TOP_K
+        );
 
-        // Search each library for relevant chunks
-        for (const libraryId of libraryIds) {
-            try {
-                // Get chunk IDs for this library
-                const chunkKeys = await this.redis.keys(`chunk:${libraryId}:*`);
-
-                for (const key of chunkKeys.slice(0, 20)) { // Limit for performance
-                    const chunk = await this.redis.get(key) as {
-                        content?: string;
-                        source?: string;
-                        embedding?: number[];
-                        metadata?: Record<string, unknown>;
-                    } | null;
-
-                    if (chunk?.content && chunk?.embedding) {
-                        const score = this.cosineSimilarity(
-                            queryEmbedding.embeddings[0]!,
-                            chunk.embedding
-                        );
-
-                        if (score > 0.5) { // Relevance threshold
-                            chunks.push({
-                                id: key,
-                                content: chunk.content,
-                                source: chunk.source ?? libraryId,
-                                score,
-                                metadata: chunk.metadata,
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.warn(`[RAGAgent] Error searching library ${libraryId}:`, error);
-            }
-        }
-
-        // Sort by score and return top chunks
-        return chunks
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 10);
-    }
-
-    private cosineSimilarity(a: number[], b: number[]): number {
-        if (a.length !== b.length) return 0;
-
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-
-        for (let i = 0; i < a.length; i++) {
-            dotProduct += (a[i] ?? 0) * (b[i] ?? 0);
-            normA += (a[i] ?? 0) ** 2;
-            normB += (b[i] ?? 0) ** 2;
-        }
-
-        const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-        return denominator === 0 ? 0 : dotProduct / denominator;
+        return retrieved.map(chunk => ({
+            id: chunk.chunk_id,
+            content: chunk.content ?? chunk.content_preview,
+            source: chunk.file_path || chunk.document_name || chunk.library_id,
+            score: chunk.score,
+            metadata: {
+                document_id: chunk.document_id,
+                page_number: chunk.page_number,
+                chunk_index: chunk.chunk_index,
+                library_id: chunk.library_id,
+                document_name: chunk.document_name,
+                file_path: chunk.file_path,
+            },
+        }));
     }
 
     private async generateAnswer(
@@ -204,6 +174,203 @@ export class RAGAgent extends BaseAgent {
             related_topics: [],
             context_sufficient: false,
             tokens: result.raw.tokens_used.total,
+        };
+    }
+
+    private chunkQuery(query: string): string[] {
+        const trimmed = query.trim();
+        if (!trimmed) return [];
+
+        const chunks: string[] = [];
+        let index = 0;
+
+        while (index < trimmed.length) {
+            const end = Math.min(trimmed.length, index + this.QUERY_CHUNK_SIZE);
+            const chunk = trimmed.slice(index, end).trim();
+            if (chunk) {
+                chunks.push(chunk);
+            }
+            if (end >= trimmed.length) break;
+            index = end - this.QUERY_CHUNK_OVERLAP;
+        }
+
+        return chunks;
+    }
+
+    private async searchEmbeddings(
+        embeddings: number[][],
+        libraryIds: string[],
+        topK: number
+    ): Promise<RetrievalChunkSummary[]> {
+        if (embeddings.length === 0) {
+            return [];
+        }
+
+        const aggregated = new Map<string, RetrievalChunkSummary>();
+
+        for (const embedding of embeddings) {
+            if (embedding.every(value => value === 0)) {
+                continue;
+            }
+
+            const results = await this.vectorSearch(embedding, libraryIds, topK);
+            for (const result of results) {
+                const existing = aggregated.get(result.chunk_id);
+                if (!existing || result.score > existing.score) {
+                    aggregated.set(result.chunk_id, result);
+                }
+            }
+        }
+
+        return Array.from(aggregated.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, topK);
+    }
+
+    private async vectorSearch(
+        embedding: number[],
+        libraryIds: string[],
+        topK: number
+    ): Promise<RetrievalChunkSummary[]> {
+        const libraryFilter = libraryIds.length
+            ? `@library:{${libraryIds.join('|')}}`
+            : '*';
+        const queryFilter = `${libraryFilter} @searchable:{true}`;
+
+        const vector = Buffer.from(Float32Array.from(embedding).buffer);
+
+        const returnFields = [
+            'score',
+            '$.id',
+            '$.library',
+            '$.document_id',
+            '$.document_name',
+            '$.file_path',
+            '$.page_number',
+            '$.chunk_index',
+            '$.content',
+        ];
+
+        try {
+            const response = await this.redisClient.call(
+                'FT.SEARCH',
+                'idx:chunks',
+                `${queryFilter}=>[KNN ${topK} @embedding $vector AS score]`,
+                'PARAMS',
+                '2',
+                'vector',
+                vector,
+                'RETURN',
+                returnFields.length.toString(),
+                ...returnFields,
+                'SORTBY',
+                'score',
+                'ASC',
+                'DIALECT',
+                '2'
+            ) as Array<string | number | Array<string>>;
+
+            return this.parseSearchResults(response);
+        } catch (error) {
+            console.warn('[RAGAgent] Vector search failed:', error);
+            return [];
+        }
+    }
+
+    private parseSearchResults(
+        response: Array<string | number | Array<string>>
+    ): RetrievalChunkSummary[] {
+        const results: RetrievalChunkSummary[] = [];
+        if (response.length < 2) {
+            return results;
+        }
+
+        for (let i = 1; i < response.length; i += 2) {
+            const docId = response[i] as string;
+            const fields = response[i + 1] as string[] | undefined;
+            if (!fields) continue;
+
+            const fieldMap = this.parseFieldMap(fields);
+            const rawScore = Number(fieldMap.score ?? 0);
+            const similarity = Number.isFinite(rawScore) ? 1 - rawScore : 0;
+            const chunkId = (fieldMap['$.id'] as string | undefined) ?? docId;
+
+            results.push({
+                chunk_id: chunkId,
+                library_id: (fieldMap['$.library'] as string | undefined) ?? '',
+                document_id: (fieldMap['$.document_id'] as string | undefined) ?? '',
+                document_name: (fieldMap['$.document_name'] as string | undefined) ?? '',
+                file_path: (fieldMap['$.file_path'] as string | undefined) ?? '',
+                page_number: fieldMap['$.page_number'] as number | undefined,
+                chunk_index: fieldMap['$.chunk_index'] as number | undefined,
+                score: similarity,
+                content_preview: this.previewContent(fieldMap['$.content'] as string | undefined),
+                content: fieldMap['$.content'] as string | undefined,
+            });
+        }
+
+        return results;
+    }
+
+    private parseFieldMap(fields: string[]): Record<string, string | number> {
+        const fieldMap: Record<string, string | number> = {};
+        for (let i = 0; i < fields.length; i += 2) {
+            const key = fields[i] as string;
+            const value = fields[i + 1] as string | undefined;
+            if (!key) continue;
+            fieldMap[key] = this.parseJsonField(value);
+        }
+        return fieldMap;
+    }
+
+    private parseJsonField(value?: string): string | number {
+        if (value === undefined) return '';
+        try {
+            const parsed = JSON.parse(value);
+            if (typeof parsed === 'string' || typeof parsed === 'number') {
+                return parsed;
+            }
+            return JSON.stringify(parsed);
+        } catch {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : value;
+        }
+    }
+
+    private previewContent(content?: string): string {
+        if (!content) return '';
+        const trimmed = content.trim();
+        return trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed;
+    }
+
+    private async buildRetrievalReport(
+        query: string,
+        libraryIds: string[],
+        chunks: RetrievedChunk[]
+    ): Promise<RetrievalReport> {
+        const queryChunks = this.chunkQuery(query);
+        const embeddingResult = queryChunks.length > 0
+            ? await this.llm.embed(queryChunks)
+            : { model: 'unknown', embeddings: [], dimensions: 0 };
+
+        return {
+            query,
+            query_chunks: queryChunks,
+            library_ids: libraryIds,
+            embedding_model: embeddingResult.model,
+            requested_k: this.DEFAULT_TOP_K,
+            retrieved_at: new Date().toISOString(),
+            results: chunks.map((chunk) => ({
+                chunk_id: chunk.id,
+                library_id: (chunk.metadata?.library_id as string) ?? '',
+                document_id: (chunk.metadata?.document_id as string) ?? '',
+                document_name: (chunk.metadata?.document_name as string) ?? chunk.source,
+                file_path: (chunk.metadata?.file_path as string) ?? chunk.source,
+                page_number: chunk.metadata?.page_number as number | undefined,
+                chunk_index: chunk.metadata?.chunk_index as number | undefined,
+                score: chunk.score,
+                content_preview: this.previewContent(chunk.content),
+            })),
         };
     }
 }

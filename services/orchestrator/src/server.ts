@@ -6,12 +6,18 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
-import { getRedisClient, closeRedisClient, createAllIndexes, checkIndexesExist } from '@mother-harness/shared';
+import {
+    getRedisClient,
+    closeRedisClient,
+    createAllIndexes,
+    checkIndexesExist,
+    logAuditEvent,
+    redactPIIFromObject,
+    resolveLibraryAccess,
+} from '@mother-harness/shared';
 import { Orchestrator } from './orchestrator.js';
 import { config } from './config.js';
-import { getCostTracker } from './cost-tracker.js';
-import { getActivityMetrics } from './activity-metrics.js';
-import { startActivityMetricsConsumer } from './activity-metrics-consumer.js';
+import { registerAuth, requireRole, type UserSession } from './auth.js';
 
 // Create Fastify instance
 const app = Fastify({
@@ -34,6 +40,7 @@ async function registerPlugins() {
     });
 
     await app.register(websocket);
+    await registerAuth(app);
 }
 
 // Health check endpoint
@@ -48,8 +55,23 @@ app.get('/health', async () => {
 });
 
 // API routes
-app.post('/api/ask', async (request, reply) => {
-    const body = request.body as { query: string; project_id?: string; user_id: string };
+app.post('/api/ask', { preHandler: requireRole('user', 'admin') }, async (request, reply) => {
+    const body = request.body as { query: string; project_id?: string; library_ids?: string[] };
+    const user = (request as any).user as UserSession;
+    const requestedLibraries = body.library_ids ?? [];
+    const allowedLibraryIds = process.env['LIBRARY_ALLOWED_IDS']
+        ?.split(',')
+        .map(entry => entry.trim())
+        .filter(Boolean);
+
+    const access = resolveLibraryAccess(requestedLibraries, user.roles, {
+        allowedLibraryIds,
+    });
+
+    if (access.denied.length > 0) {
+        reply.status(403);
+        return { error: 'Library access denied', denied: access.denied };
+    }
 
     try {
         const { run, task } = await orchestrator.createRun(
@@ -166,54 +188,42 @@ app.get('/api/task/:id', async (request, reply) => {
     }
 });
 
-app.get('/api/projects', async (request) => {
-    const { user_id } = request.query as { user_id: string };
-    return await orchestrator.listProjects(user_id);
+app.get('/api/projects', { preHandler: requireRole('user', 'admin') }, async (request) => {
+    const { user_id } = request.query as { user_id?: string };
+    const user = (request as any).user as UserSession;
+    const requestedUserId = user.roles.includes('admin') && user_id ? user_id : user.user_id;
+    return await orchestrator.listProjects(requestedUserId);
 });
 
-app.get('/api/approvals/pending', async (request) => {
-    const { user_id } = request.query as { user_id: string };
-    return await orchestrator.getPendingApprovals(user_id);
+app.get('/api/approvals/pending', { preHandler: requireRole('user', 'approver', 'admin') }, async (request) => {
+    const user = (request as any).user as UserSession;
+    return await orchestrator.getPendingApprovals(user.user_id);
 });
 
-app.get('/api/metrics/activity', async (request, reply) => {
-    const { user_id, days } = request.query as { user_id: string; days?: string };
-    if (!user_id) {
-        reply.status(400);
-        return { error: 'user_id is required' };
-    }
-    const parsedDays = days ? Number.parseInt(days, 10) : 7;
-    return await getActivityMetrics(user_id, Number.isNaN(parsedDays) ? 7 : parsedDays);
-});
-
-app.get('/api/budget', async (request, reply) => {
-    const { user_id } = request.query as { user_id: string };
-    if (!user_id) {
-        reply.status(400);
-        return { error: 'user_id is required' };
-    }
-
-    try {
-        const tracker = getCostTracker();
-        const [status, usage] = await Promise.all([
-            tracker.getBudgetStatus(user_id),
-            tracker.getUsageReport(user_id),
-        ]);
-
-        return { status, usage };
-    } catch (error) {
-        app.log.error(error, 'Failed to get budget metrics');
-        reply.status(500);
-        return { error: 'Failed to get budget metrics' };
-    }
-});
-
-app.post('/api/approvals/:id/respond', async (request, reply) => {
+app.post('/api/approvals/:id/respond', { preHandler: requireRole('approver', 'admin') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { approved, notes } = request.body as { approved: boolean; notes?: string };
+    const user = (request as any).user as UserSession;
 
     try {
         await orchestrator.respondToApproval(id, approved, notes);
+        await logAuditEvent({
+            type: 'approval_responded',
+            action: approved ? 'approved' : 'rejected',
+            actor: {
+                user_id: user.user_id,
+                email: user.email,
+                roles: user.roles,
+            },
+            resource: {
+                type: 'approval',
+                id,
+            },
+            metadata: {
+                notes,
+            },
+            status: 'success',
+        });
         return { success: true };
     } catch (error) {
         app.log.error(error, 'Failed to respond to approval');
@@ -223,7 +233,7 @@ app.post('/api/approvals/:id/respond', async (request, reply) => {
 });
 
 // WebSocket endpoint for real-time task updates
-app.get('/ws', { websocket: true }, (connection, request) => {
+app.get('/ws', { websocket: true, preHandler: requireRole('user', 'admin') }, (connection, request) => {
     const { socket } = connection;
     const taskId = new URL(request.url, 'http://localhost').searchParams.get('task_id');
 
@@ -256,6 +266,44 @@ app.get('/ws', { websocket: true }, (connection, request) => {
         type: 'connected', 
         task_id: taskId 
     }));
+});
+
+app.addHook('onResponse', async (request, reply) => {
+    if (request.url === '/health' || request.url.startsWith('/ws')) {
+        return;
+    }
+
+    const user = (request as any).user as UserSession | undefined;
+    if (!user) return;
+
+    try {
+        await logAuditEvent({
+            type: 'access',
+            action: request.method,
+            actor: {
+                user_id: user.user_id,
+                email: user.email,
+                roles: user.roles,
+            },
+            resource: {
+                type: 'http',
+                id: request.routerPath ?? request.url,
+                attributes: {
+                    path: request.url,
+                },
+            },
+            metadata: {
+                status_code: reply.statusCode,
+                query: redactPIIFromObject(request.query),
+                body: request.body ? redactPIIFromObject(request.body) : undefined,
+            },
+            status: reply.statusCode < 400 ? 'success' : 'error',
+            ip: request.ip,
+            user_agent: request.headers['user-agent'],
+        });
+    } catch (error) {
+        app.log.warn({ error }, 'Failed to write audit log');
+    }
 });
 
 // Check Redis health

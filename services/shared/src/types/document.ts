@@ -25,7 +25,7 @@ export interface TableReference {
     page_number?: number;
 }
 
-/** Document chunk - stored in Redis as doc:{id} */
+/** Document chunk - stored in Redis as chunk:{libraryId}:{id} */
 export interface DocumentChunk {
     id: string;                    // chunk-uuid
     library: string;               // Library ID this belongs to
@@ -46,6 +46,9 @@ export interface DocumentChunk {
     section_title?: string;
     hierarchy: string[];           // e.g., ['Chapter 1', 'Section 1.1']
     chunk_type: ChunkType;
+    chunk_index: number;
+    total_chunks: number;
+    content_hash: string;
 
     // Timestamps
     indexed_at: string;
@@ -64,6 +67,7 @@ export interface Library {
 
     // Stats
     document_count: number;
+    chunk_count: number;
     total_size_bytes: number;
     last_scanned: string;
     scan_status: ScanStatus;
@@ -93,6 +97,7 @@ export interface DoclingJob {
     created_at: string;
     started_at?: string;
     completed_at?: string;
+    updated_at?: string;
 }
 
 /** Create a new library */
@@ -108,6 +113,7 @@ export function createLibrary(
         name,
         folder_path: folderPath,
         document_count: 0,
+        chunk_count: 0,
         total_size_bytes: 0,
         last_scanned: now,
         scan_status: 'idle',
