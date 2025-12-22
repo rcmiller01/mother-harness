@@ -476,10 +476,40 @@ export class Orchestrator {
             library_ids: [], // Would be populated from project settings
         };
 
-        // Execute the agent
+        const workflowResult = await this.n8nAdapter.triggerWorkflow(
+            step.agent,
+            {
+                task_id: task.id,
+                step_id: step.id,
+                agent: step.agent,
+                inputs: step.description,
+                context,
+            },
+            {
+                fallback_to_direct: true,
+            }
+        );
+
+        if (workflowResult.success) {
+            return this.normalizeWorkflowResult(step, workflowResult);
+        }
+
+        if (!executor) {
+            console.warn(`No executor registered for agent: ${step.agent}`);
+            throw new Error(
+                workflowResult.error?.message
+                    ?? `Workflow failed and no executor registered for agent: ${step.agent}`
+            );
+        }
+
+        // Execute the agent directly
         const startTime = Date.now();
         const result = await executor(step.description, context);
         result.duration_ms = Date.now() - startTime;
+        result.outputs = {
+            ...(result.outputs ?? {}),
+            workflow_error: workflowResult.error,
+        };
 
         const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
             step.agent,
@@ -491,6 +521,56 @@ export class Orchestrator {
         }
 
         return result;
+    }
+
+    private normalizeWorkflowResult(step: TodoItem, workflowResult: WorkflowResult): AgentResult {
+        const outputs: Record<string, unknown> = {
+            workflow_data: workflowResult.data,
+            workflow_execution_id: workflowResult.execution_id,
+        };
+
+        const agentResult: AgentResult = {
+            success: true,
+            outputs,
+            explanation: `Executed step via workflow: ${step.description}`,
+            tokens_used: 0,
+            duration_ms: workflowResult.duration_ms,
+        };
+
+        if (workflowResult.data && typeof workflowResult.data === 'object') {
+            const payload = workflowResult.data as {
+                outputs?: Record<string, unknown>;
+                explanation?: string;
+                tokens_used?: number;
+                duration_ms?: number;
+                success?: boolean;
+            };
+
+            if (payload.outputs && typeof payload.outputs === 'object') {
+                agentResult.outputs = {
+                    ...outputs,
+                    ...payload.outputs,
+                };
+            }
+
+            if (typeof payload.explanation === 'string') {
+                agentResult.explanation = payload.explanation;
+            }
+
+            if (typeof payload.tokens_used === 'number') {
+                agentResult.tokens_used = payload.tokens_used;
+            }
+
+            if (typeof payload.duration_ms === 'number') {
+                agentResult.duration_ms = payload.duration_ms;
+            }
+
+            if (typeof payload.success === 'boolean') {
+                agentResult.success = payload.success;
+            }
+        }
+
+        return agentResult;
     }
 
     /**
