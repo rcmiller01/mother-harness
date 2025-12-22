@@ -9,6 +9,9 @@ import websocket from '@fastify/websocket';
 import { getRedisClient, closeRedisClient, createAllIndexes, checkIndexesExist } from '@mother-harness/shared';
 import { Orchestrator } from './orchestrator.js';
 import { config } from './config.js';
+import { getCostTracker } from './cost-tracker.js';
+import { getActivityMetrics } from './activity-metrics.js';
+import { startActivityMetricsConsumer } from './activity-metrics-consumer.js';
 
 // Create Fastify instance
 const app = Fastify({
@@ -22,6 +25,7 @@ const app = Fastify({
 
 // Orchestrator instance
 let orchestrator: Orchestrator;
+let metricsConsumer: ReturnType<typeof startActivityMetricsConsumer> | null = null;
 
 // Register plugins
 async function registerPlugins() {
@@ -172,6 +176,38 @@ app.get('/api/approvals/pending', async (request) => {
     return await orchestrator.getPendingApprovals(user_id);
 });
 
+app.get('/api/metrics/activity', async (request, reply) => {
+    const { user_id, days } = request.query as { user_id: string; days?: string };
+    if (!user_id) {
+        reply.status(400);
+        return { error: 'user_id is required' };
+    }
+    const parsedDays = days ? Number.parseInt(days, 10) : 7;
+    return await getActivityMetrics(user_id, Number.isNaN(parsedDays) ? 7 : parsedDays);
+});
+
+app.get('/api/budget', async (request, reply) => {
+    const { user_id } = request.query as { user_id: string };
+    if (!user_id) {
+        reply.status(400);
+        return { error: 'user_id is required' };
+    }
+
+    try {
+        const tracker = getCostTracker();
+        const [status, usage] = await Promise.all([
+            tracker.getBudgetStatus(user_id),
+            tracker.getUsageReport(user_id),
+        ]);
+
+        return { status, usage };
+    } catch (error) {
+        app.log.error(error, 'Failed to get budget metrics');
+        reply.status(500);
+        return { error: 'Failed to get budget metrics' };
+    }
+});
+
 app.post('/api/approvals/:id/respond', async (request, reply) => {
     const { id } = request.params as { id: string };
     const { approved, notes } = request.body as { approved: boolean; notes?: string };
@@ -253,6 +289,7 @@ async function start() {
 
         // Initialize orchestrator
         orchestrator = new Orchestrator();
+        metricsConsumer = startActivityMetricsConsumer();
 
         await app.listen({
             port: config.port,
@@ -269,6 +306,9 @@ async function start() {
 // Graceful shutdown
 async function shutdown() {
     app.log.info('Shutting down...');
+    if (metricsConsumer) {
+        await metricsConsumer.stop();
+    }
     await app.close();
     await closeRedisClient();
     process.exit(0);
