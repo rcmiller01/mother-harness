@@ -15,6 +15,13 @@ export type {
 } from './role.js';
 export { DEFAULT_ROLES } from './role.js';
 
+// Contract types
+export type { AgentContract } from './contract.js';
+export { DEFAULT_AGENT_CONTRACTS } from './contract.js';
+
+// Registry types
+export type { RoleRegistryEntry } from './registry.js';
+
 
 // Task types
 export type {

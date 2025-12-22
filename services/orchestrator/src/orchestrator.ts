@@ -13,6 +13,8 @@ import {
     createTask,
     createProject,
     getRedisJSON,
+    getContractEnforcer,
+    getRoleRegistry,
     TaskSchema,
     ProjectSchema,
     ApprovalSchema,
@@ -26,6 +28,7 @@ import { Tier3Memory } from './memory/tier3-longterm.js';
 interface AgentResult {
     success: boolean;
     outputs: Record<string, unknown>;
+    artifacts?: string[];
     explanation?: string;
     tokens_used?: number;
     duration_ms?: number;
@@ -50,6 +53,8 @@ export class Orchestrator {
     private tier1 = new Tier1Memory();
     private tier2 = new Tier2Memory();
     private tier3 = new Tier3Memory();
+    private enforcer = getContractEnforcer();
+    private registry = getRoleRegistry();
 
     /**
      * Create a new task from user query
@@ -182,9 +187,32 @@ export class Orchestrator {
      */
     private async executeStep(task: Task, step: TodoItem): Promise<AgentResult> {
         const executor = agentExecutors.get(step.agent);
+        const contract = await this.registry.getContract(step.agent);
+
+        if (!contract) {
+            throw new Error(`Contract not found for agent: ${step.agent}`);
+        }
+
+        const allowlistValidation = await this.enforcer.validateAllowlist(
+            step.agent,
+            contract.default_action
+        );
+
+        if (!allowlistValidation.valid) {
+            throw new Error(allowlistValidation.errors.join('; '));
+        }
 
         if (!executor) {
             console.warn(`No executor registered for agent: ${step.agent}`);
+            const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
+                step.agent,
+                []
+            );
+
+            if (!requiredArtifactsValidation.valid) {
+                throw new Error(requiredArtifactsValidation.errors.join('; '));
+            }
+
             // Return placeholder result
             return {
                 success: true,
@@ -194,6 +222,7 @@ export class Orchestrator {
                     executed_at: new Date().toISOString(),
                     note: 'No agent executor registered - using placeholder',
                 },
+                artifacts: [],
                 explanation: `Executed step: ${step.description}`,
                 tokens_used: 0,
                 duration_ms: 0,
@@ -218,6 +247,15 @@ export class Orchestrator {
         const startTime = Date.now();
         const result = await executor(step.description, context);
         result.duration_ms = Date.now() - startTime;
+
+        const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
+            step.agent,
+            result.artifacts ?? []
+        );
+
+        if (!requiredArtifactsValidation.valid) {
+            throw new Error(requiredArtifactsValidation.errors.join('; '));
+        }
 
         return result;
     }

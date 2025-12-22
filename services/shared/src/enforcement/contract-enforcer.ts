@@ -102,6 +102,66 @@ export class ContractEnforcer {
     }
 
     /**
+     * Validate action allowlist from the agent contract
+     */
+    async validateAllowlist(
+        agentType: AgentType,
+        action: string
+    ): Promise<ContractValidation> {
+        const contract = await this.registry.getContract(agentType);
+
+        if (!contract) {
+            return {
+                valid: false,
+                errors: [`Contract not found for agent: ${agentType}`],
+                warnings: [],
+            };
+        }
+
+        if (!contract.action_allowlist.includes(action)) {
+            return {
+                valid: false,
+                errors: [`Action ${action} is not allowlisted for agent: ${agentType}`],
+                warnings: [],
+            };
+        }
+
+        return { valid: true, errors: [], warnings: [] };
+    }
+
+    /**
+     * Validate required artifacts from the agent contract
+     */
+    async validateRequiredArtifacts(
+        agentType: AgentType,
+        artifacts: string[]
+    ): Promise<ContractValidation> {
+        const contract = await this.registry.getContract(agentType);
+
+        if (!contract) {
+            return {
+                valid: false,
+                errors: [`Contract not found for agent: ${agentType}`],
+                warnings: [],
+            };
+        }
+
+        const missing = contract.required_artifacts.filter(
+            artifact => !artifacts.includes(artifact)
+        );
+
+        if (missing.length > 0) {
+            return {
+                valid: false,
+                errors: missing.map(m => `Missing required artifact: ${m}`),
+                warnings: [],
+            };
+        }
+
+        return { valid: true, errors: [], warnings: [] };
+    }
+
+    /**
      * Validate agent outputs meet phase exit criteria
      */
     async validatePhaseExit(
