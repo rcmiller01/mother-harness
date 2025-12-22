@@ -4,18 +4,8 @@
  */
 
 import { getRedisClient } from '@mother-harness/shared';
-
-export type ActivityEventType =
-    | 'run_created'
-    | 'run_started'
-    | 'run_waiting_approval'
-    | 'run_terminated'
-    | 'step_started'
-    | 'step_completed'
-    | 'step_failed'
-    | 'approval_requested'
-    | 'approval_approved'
-    | 'approval_rejected';
+import { getActivityEventTaxonomy, type ActivityEventType } from './event-taxonomy.js';
+import { logger } from './logger.js';
 
 export interface ActivityEvent {
     type: ActivityEventType;
@@ -33,12 +23,21 @@ export async function logActivity(event: ActivityEvent): Promise<void> {
     const redis = getRedisClient();
     const timestamp = event.timestamp ?? new Date().toISOString();
     const payload = JSON.stringify(event.details ?? {});
+    const taxonomy = getActivityEventTaxonomy(event.type);
 
     await redis.xadd(
         STREAM_KEY,
         '*',
         'event_type',
         event.type,
+        'event_category',
+        taxonomy.category,
+        'event_action',
+        taxonomy.action,
+        'event_outcome',
+        taxonomy.outcome,
+        'event_severity',
+        taxonomy.severity,
         'run_id',
         event.run_id,
         'task_id',
@@ -52,4 +51,17 @@ export async function logActivity(event: ActivityEvent): Promise<void> {
         'details',
         payload
     );
+
+    logger.event('info', {
+        name: event.type,
+        category: taxonomy.category,
+        action: taxonomy.action,
+        outcome: taxonomy.outcome,
+        severity: taxonomy.severity,
+    }, 'Activity event logged', {
+        run_id: event.run_id,
+        task_id: event.task_id,
+        project_id: event.project_id,
+        user_id: event.user_id,
+    });
 }

@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import {
     type Task,
     type Project,
+    type Library,
     type Approval,
     type TodoItem,
     type AgentType,
@@ -15,13 +16,16 @@ import {
     type TerminationRecord,
     createTask,
     createProject,
+    createLibrary,
     getRedisJSON,
-    getResourceBudgetGuard,
+    getContractEnforcer,
+    getRoleRegistry,
     TaskSchema,
     ArtifactSchema,
     ProjectSchema,
     ApprovalSchema,
     RunSchema,
+    LibrarySchema,
 } from '@mother-harness/shared';
 import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
@@ -34,6 +38,7 @@ import { getCostTracker } from './cost-tracker.js';
 interface AgentResult {
     success: boolean;
     outputs: Record<string, unknown>;
+    artifacts?: string[];
     explanation?: string;
     tokens_used?: number;
     duration_ms?: number;
@@ -59,8 +64,8 @@ export class Orchestrator {
     private tier1 = new Tier1Memory();
     private tier2 = new Tier2Memory();
     private tier3 = new Tier3Memory();
-    private budgetGuard = getResourceBudgetGuard();
-    private costTracker = getCostTracker();
+    private enforcer = getContractEnforcer();
+    private registry = getRoleRegistry();
 
     /**
      * Create a run with a new task
@@ -131,6 +136,78 @@ export class Orchestrator {
     }
 
     /**
+     * List document libraries
+     */
+    async listLibraries(search?: string): Promise<Library[]> {
+        const keys = await this.redis.keys('library:*');
+        const libraries: Library[] = [];
+        const query = search?.trim().toLowerCase();
+
+        for (const key of keys) {
+            const library = await this.redis.get(key) as Library | null;
+            if (!library) continue;
+            const result = LibrarySchema.safeParse(library);
+            if (!result.success) {
+                console.error('Invalid library data:', result.error);
+                continue;
+            }
+
+            if (query) {
+                const haystack = [
+                    result.data.name,
+                    result.data.id,
+                    result.data.folder_path,
+                    result.data.description ?? '',
+                ].join(' ').toLowerCase();
+                if (!haystack.includes(query)) continue;
+            }
+
+            libraries.push(result.data);
+        }
+
+        return libraries.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * Create a new document library
+     */
+    async createLibrary(
+        name: string,
+        folderPath: string,
+        description?: string,
+        autoScan: boolean = true
+    ): Promise<Library> {
+        const libraryId = `lib-${nanoid(10)}`;
+        const library = createLibrary(libraryId, name, folderPath, autoScan);
+        if (description) {
+            library.description = description;
+        }
+
+        await this.redis.set(`library:${libraryId}`, '$', library);
+        return library;
+    }
+
+    /**
+     * Trigger a rescan for a library
+     */
+    async rescanLibrary(libraryId: string): Promise<Library | null> {
+        const library = await this.redis.get(`library:${libraryId}`) as Library | null;
+        if (!library) return null;
+
+        const now = new Date().toISOString();
+        const updated = {
+            ...library,
+            scan_status: 'scanning' as const,
+            last_scanned: now,
+            updated_at: now,
+            processed_count: 0,
+        };
+
+        await this.redis.set(`library:${libraryId}`, '$', updated);
+        return updated;
+    }
+
+    /**
      * Get artifacts for a run
      */
     async getRunArtifacts(runId: string): Promise<Task['artifacts'] | null> {
@@ -172,10 +249,10 @@ export class Orchestrator {
         const task = createTask(taskId, actualProjectId, userId, query);
 
         // Add user message to tier 1 memory
-        await this.tier1.addMessage(taskId, 'user', query);
+        await this.tier1.addUserMessage(actualProjectId, query);
 
         // Get context from memory for planning
-        const recentContext = await this.tier1.getContextString(taskId);
+        const recentContext = await this.tier1.getContextString(actualProjectId);
         const summaryContext = await this.tier2.getContextString(actualProjectId, 3);
         const longTermContext = await this.tier3.getContextString(actualProjectId, query);
 
@@ -428,7 +505,7 @@ export class Orchestrator {
 
                 // Add assistant response to tier 1 memory
                 if (result.explanation) {
-                    await this.tier1.addMessage(taskId, 'assistant', result.explanation);
+                    await this.tier1.addAssistantMessage(task.project_id, result.explanation, step.agent);
                 }
 
                 // Update step with result
@@ -489,9 +566,32 @@ export class Orchestrator {
      */
     private async executeStep(task: Task, step: TodoItem): Promise<AgentResult> {
         const executor = agentExecutors.get(step.agent);
+        const contract = await this.registry.getContract(step.agent);
+
+        if (!contract) {
+            throw new Error(`Contract not found for agent: ${step.agent}`);
+        }
+
+        const allowlistValidation = await this.enforcer.validateAllowlist(
+            step.agent,
+            contract.default_action
+        );
+
+        if (!allowlistValidation.valid) {
+            throw new Error(allowlistValidation.errors.join('; '));
+        }
 
         if (!executor) {
             console.warn(`No executor registered for agent: ${step.agent}`);
+            const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
+                step.agent,
+                []
+            );
+
+            if (!requiredArtifactsValidation.valid) {
+                throw new Error(requiredArtifactsValidation.errors.join('; '));
+            }
+
             // Return placeholder result
             return {
                 success: true,
@@ -501,6 +601,7 @@ export class Orchestrator {
                     executed_at: new Date().toISOString(),
                     note: 'No agent executor registered - using placeholder',
                 },
+                artifacts: [],
                 explanation: `Executed step: ${step.description}`,
                 tokens_used: 0,
                 duration_ms: 0,
@@ -508,7 +609,7 @@ export class Orchestrator {
         }
 
         // Build context for agent
-        const recentContext = await this.tier1.getContextString(task.id);
+        const recentContext = await this.tier1.getContextString(task.project_id);
         const longTermContext = await this.tier3.getContextString(task.project_id, step.description);
 
         const context = {
@@ -521,22 +622,101 @@ export class Orchestrator {
             library_ids: [], // Would be populated from project settings
         };
 
-        // Execute the agent
+        const workflowResult = await this.n8nAdapter.triggerWorkflow(
+            step.agent,
+            {
+                task_id: task.id,
+                step_id: step.id,
+                agent: step.agent,
+                inputs: step.description,
+                context,
+            },
+            {
+                fallback_to_direct: true,
+            }
+        );
+
+        if (workflowResult.success) {
+            return this.normalizeWorkflowResult(step, workflowResult);
+        }
+
+        if (!executor) {
+            console.warn(`No executor registered for agent: ${step.agent}`);
+            throw new Error(
+                workflowResult.error?.message
+                    ?? `Workflow failed and no executor registered for agent: ${step.agent}`
+            );
+        }
+
+        // Execute the agent directly
         const startTime = Date.now();
         const result = await executor(step.description, context);
         result.duration_ms = Date.now() - startTime;
+        result.outputs = {
+            ...(result.outputs ?? {}),
+            workflow_error: workflowResult.error,
+        };
+
+        const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
+            step.agent,
+            result.artifacts ?? []
+        );
+
+        if (!requiredArtifactsValidation.valid) {
+            throw new Error(requiredArtifactsValidation.errors.join('; '));
+        }
 
         return result;
     }
 
-    private getModelUsed(result: AgentResult): string | undefined {
-        if (result.model_used) return result.model_used;
-        const outputs = result.outputs as Record<string, unknown> | undefined;
-        const modelFromOutputs = outputs?.['model_used'];
-        if (typeof modelFromOutputs === 'string') {
-            return modelFromOutputs;
+    private normalizeWorkflowResult(step: TodoItem, workflowResult: WorkflowResult): AgentResult {
+        const outputs: Record<string, unknown> = {
+            workflow_data: workflowResult.data,
+            workflow_execution_id: workflowResult.execution_id,
+        };
+
+        const agentResult: AgentResult = {
+            success: true,
+            outputs,
+            explanation: `Executed step via workflow: ${step.description}`,
+            tokens_used: 0,
+            duration_ms: workflowResult.duration_ms,
+        };
+
+        if (workflowResult.data && typeof workflowResult.data === 'object') {
+            const payload = workflowResult.data as {
+                outputs?: Record<string, unknown>;
+                explanation?: string;
+                tokens_used?: number;
+                duration_ms?: number;
+                success?: boolean;
+            };
+
+            if (payload.outputs && typeof payload.outputs === 'object') {
+                agentResult.outputs = {
+                    ...outputs,
+                    ...payload.outputs,
+                };
+            }
+
+            if (typeof payload.explanation === 'string') {
+                agentResult.explanation = payload.explanation;
+            }
+
+            if (typeof payload.tokens_used === 'number') {
+                agentResult.tokens_used = payload.tokens_used;
+            }
+
+            if (typeof payload.duration_ms === 'number') {
+                agentResult.duration_ms = payload.duration_ms;
+            }
+
+            if (typeof payload.success === 'boolean') {
+                agentResult.success = payload.success;
+            }
         }
-        return undefined;
+
+        return agentResult;
     }
 
     /**
@@ -687,6 +867,27 @@ export class Orchestrator {
         };
 
         await this.redis.set(`approval:${approval.id}`, '$', approval);
+        await logAuditEvent({
+            type: 'approval_requested',
+            action: approval.type,
+            actor: {
+                user_id: task.user_id,
+                roles: ['user'],
+            },
+            resource: {
+                type: 'approval',
+                id: approval.id,
+                attributes: {
+                    task_id: task.id,
+                    step_id: step.id,
+                },
+            },
+            metadata: {
+                description: step.description,
+                risk_level: approval.risk_level,
+            },
+            status: 'pending',
+        });
         return approval;
     }
 
@@ -864,7 +1065,7 @@ export class Orchestrator {
         longTerm: string;
     }> {
         return {
-            recent: await this.tier1.getContextString(taskId),
+            recent: await this.tier1.getContextString(projectId),
             summaries: await this.tier2.getContextString(projectId),
             longTerm: await this.tier3.getContextString(projectId, query),
         };

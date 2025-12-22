@@ -81,7 +81,8 @@ async function processStream(
 
             for (const [_stream, entries] of messages) {
                 for (const [id, fields] of entries) {
-                    const jobData = fields[1]; // fields is ['job', '<json>']
+                    const jobIndex = fields.findIndex((field) => field === 'job');
+                    const jobData = jobIndex >= 0 ? fields[jobIndex + 1] : undefined;
 
                     if (jobData) {
                         const job = JSON.parse(jobData);

@@ -3,6 +3,8 @@
  * JSON-formatted logs for observability
  */
 
+import type { EventCategory, EventOutcome, EventSeverity } from './event-taxonomy.js';
+
 /** Log levels */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -12,6 +14,15 @@ interface LogEntry {
     level: LogLevel;
     message: string;
     service: string;
+
+    // Event taxonomy
+    event?: {
+        name: string;
+        category?: EventCategory;
+        action?: string;
+        outcome?: EventOutcome;
+        severity?: EventSeverity;
+    };
 
     // Optional context
     task_id?: string;
@@ -77,6 +88,23 @@ export function createLogger(context: {
                 } : undefined,
                 data,
             }),
+
+        event: (
+            level: LogLevel,
+            event: {
+                name: string;
+                category?: EventCategory;
+                action?: string;
+                outcome?: EventOutcome;
+                severity?: EventSeverity;
+            },
+            message: string,
+            data?: Record<string, unknown>
+        ) => log(level, message, {
+            ...context,
+            event,
+            data,
+        }),
 
         child: (additionalContext: Record<string, string>) =>
             createLogger({ ...context, ...additionalContext }),
@@ -149,6 +177,15 @@ function formatPretty(entry: LogEntry): string {
         if (entry.error.stack && entry.level === 'error') {
             line += `\n  ${'\x1b[90m'}${entry.error.stack.split('\n').slice(1, 4).join('\n  ')}${reset}`;
         }
+    }
+
+    if (entry.event) {
+        line += `\n  ${'\x1b[90m'}event=${entry.event.name}`;
+        if (entry.event.category) line += ` category=${entry.event.category}`;
+        if (entry.event.action) line += ` action=${entry.event.action}`;
+        if (entry.event.outcome) line += ` outcome=${entry.event.outcome}`;
+        if (entry.event.severity) line += ` severity=${entry.event.severity}`;
+        line += `${reset}`;
     }
 
     if (entry.data && Object.keys(entry.data).length > 0) {

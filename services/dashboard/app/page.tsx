@@ -1,10 +1,18 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useAuth, getAuthHeaders } from '../lib/auth';
 
-interface UsagePayload {
-    budget: {
+interface RunHistoryItem {
+    id: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    task_id: string;
+}
+
+interface BudgetSummary {
+    status: {
         daily_spend: number;
         monthly_spend: number;
         daily_remaining: number;
@@ -20,20 +28,172 @@ interface UsagePayload {
     };
 }
 
+interface ActivityMetricsSnapshot {
+    user_id: string;
+    days: Array<{
+        date: string;
+        activity: Record<string, number>;
+        errors: Record<string, number>;
+        runs: Record<string, number>;
+    }>;
+}
+
 export default function HomePage() {
     const { user, loading: authLoading, isAuthenticated, login, logout } = useAuth();
     const [query, setQuery] = useState('');
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<{ task_id: string; status: string } | null>(null);
-    const [usage, setUsage] = useState<UsagePayload | null>(null);
-    const [usageLoading, setUsageLoading] = useState(false);
-    const [usageError, setUsageError] = useState('');
+    const [runHistory, setRunHistory] = useState<RunHistoryItem[]>([]);
+    const [budgetSummary, setBudgetSummary] = useState<BudgetSummary | null>(null);
+    const [activityMetrics, setActivityMetrics] = useState<ActivityMetricsSnapshot | null>(null);
+    const [dashboardLoading, setDashboardLoading] = useState(false);
+    const [dashboardError, setDashboardError] = useState('');
+
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [projectLoading, setProjectLoading] = useState(false);
+    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+    const [runs, setRuns] = useState<Run[]>([]);
+    const [runsLoading, setRunsLoading] = useState(false);
+    const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+    const [artifactLoading, setArtifactLoading] = useState(false);
+    const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
+
+    const [libraries, setLibraries] = useState<Library[]>([]);
+    const [libraryLoading, setLibraryLoading] = useState(false);
+    const [librarySearch, setLibrarySearch] = useState('');
+    const [libraryName, setLibraryName] = useState('');
+    const [libraryPath, setLibraryPath] = useState('');
+    const [libraryDescription, setLibraryDescription] = useState('');
+    const [libraryAutoScan, setLibraryAutoScan] = useState(true);
+    const [libraryMessage, setLibraryMessage] = useState('');
+
+    const [approvals, setApprovals] = useState<Approval[]>([]);
+    const [approvalsLoading, setApprovalsLoading] = useState(false);
+    const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
+    const [approvalMessage, setApprovalMessage] = useState('');
 
     // Login form state
     const [showLogin, setShowLogin] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
+
+    const userId = user?.id ?? 'anonymous';
+
+    const fetchProjects = async () => {
+        if (!user?.id) return;
+        setProjectLoading(true);
+        try {
+            const response = await fetch(`/api/projects?user_id=${encodeURIComponent(user.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setProjects(data);
+            if (!selectedProjectId && data.length > 0) {
+                setSelectedProjectId(data[0].id);
+            }
+        } catch (error) {
+            console.error('Failed to load projects:', error);
+        } finally {
+            setProjectLoading(false);
+        }
+    };
+
+    const fetchRuns = async () => {
+        if (!user?.id) return;
+        setRunsLoading(true);
+        try {
+            const response = await fetch(`/api/runs?user_id=${encodeURIComponent(user.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setRuns(data);
+            if (!selectedRunId && data.length > 0) {
+                setSelectedRunId(data[0].id);
+            }
+        } catch (error) {
+            console.error('Failed to load runs:', error);
+        } finally {
+            setRunsLoading(false);
+        }
+    };
+
+    const fetchArtifacts = async (runId: string) => {
+        setArtifactLoading(true);
+        try {
+            const response = await fetch(`/api/runs/${runId}/artifacts`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setArtifacts(data);
+            setSelectedArtifact(null);
+        } catch (error) {
+            console.error('Failed to load artifacts:', error);
+        } finally {
+            setArtifactLoading(false);
+        }
+    };
+
+    const fetchArtifactDetail = async (artifactId: string) => {
+        try {
+            const response = await fetch(`/api/artifacts/${artifactId}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setSelectedArtifact(data);
+        } catch (error) {
+            console.error('Failed to load artifact:', error);
+        }
+    };
+
+    const fetchLibraries = async (search = '') => {
+        setLibraryLoading(true);
+        try {
+            const params = search ? `?search=${encodeURIComponent(search)}` : '';
+            const response = await fetch(`/api/libraries${params}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setLibraries(data);
+        } catch (error) {
+            console.error('Failed to load libraries:', error);
+        } finally {
+            setLibraryLoading(false);
+        }
+    };
+
+    const fetchApprovals = async () => {
+        if (!user?.id) return;
+        setApprovalsLoading(true);
+        try {
+            const response = await fetch(`/api/approvals/pending?user_id=${encodeURIComponent(user.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setApprovals(data);
+        } catch (error) {
+            console.error('Failed to load approvals:', error);
+        } finally {
+            setApprovalsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) return;
+        fetchProjects();
+        fetchRuns();
+        fetchLibraries();
+        fetchApprovals();
+    }, [isAuthenticated, user?.id]);
+
+    useEffect(() => {
+        if (selectedRunId) {
+            fetchArtifacts(selectedRunId);
+        }
+    }, [selectedRunId]);
 
     const handleLogin = async (e: FormEvent) => {
         e.preventDefault();
@@ -61,12 +221,14 @@ export default function HomePage() {
                 },
                 body: JSON.stringify({
                     query,
-                    user_id: user?.id ?? 'anonymous',
+                    user_id: userId,
+                    project_id: selectedProjectId ?? undefined,
                 }),
             });
 
             const data = await response.json();
             setResult(data);
+            fetchRuns();
         } catch (error) {
             console.error('Failed to submit:', error);
         } finally {
@@ -75,37 +237,44 @@ export default function HomePage() {
     };
 
     useEffect(() => {
-        const fetchUsage = async () => {
-            if (!isAuthenticated || !user?.id) {
-                setUsage(null);
-                return;
-            }
+        if (!isAuthenticated || !user?.id) {
+            setRunHistory([]);
+            setBudgetSummary(null);
+            setActivityMetrics(null);
+            return;
+        }
 
-            setUsageLoading(true);
-            setUsageError('');
+        const loadDashboardData = async () => {
+            setDashboardLoading(true);
+            setDashboardError('');
 
             try {
-                const response = await fetch(`/api/usage?user_id=${encodeURIComponent(user.id)}`, {
-                    headers: {
-                        ...getAuthHeaders(),
-                    },
-                });
+                const [runsResponse, budgetResponse, metricsResponse] = await Promise.all([
+                    fetch(`/api/runs?user_id=${user.id}`),
+                    fetch(`/api/budget?user_id=${user.id}`),
+                    fetch(`/api/metrics/activity?user_id=${user.id}&days=7`),
+                ]);
 
-                if (!response.ok) {
-                    throw new Error('Failed to load usage');
+                if (!runsResponse.ok || !budgetResponse.ok || !metricsResponse.ok) {
+                    throw new Error('Failed to load dashboard data');
                 }
 
-                const data = await response.json() as UsagePayload;
-                setUsage(data);
+                const runsData = await runsResponse.json();
+                const budgetData = await budgetResponse.json();
+                const metricsData = await metricsResponse.json();
+
+                setRunHistory(runsData);
+                setBudgetSummary(budgetData);
+                setActivityMetrics(metricsData);
             } catch (error) {
-                setUsageError(error instanceof Error ? error.message : 'Failed to load usage');
-                setUsage(null);
+                console.error('Failed to load dashboard data', error);
+                setDashboardError('Unable to load dashboard data.');
             } finally {
-                setUsageLoading(false);
+                setDashboardLoading(false);
             }
         };
 
-        fetchUsage();
+        loadDashboardData();
     }, [isAuthenticated, user?.id]);
 
     const formatCurrency = (value: number) => `$${value.toFixed(2)}`;
@@ -119,7 +288,7 @@ export default function HomePage() {
     }
 
     return (
-        <main style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
+        <main style={{ padding: '2rem', maxWidth: '1100px', margin: '0 auto' }}>
             {/* Header with auth controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div>
@@ -275,130 +444,256 @@ export default function HomePage() {
                 </div>
             )}
 
-            {isAuthenticated && (
-                <div style={{
-                    padding: '1rem',
-                    backgroundColor: '#f8f9fb',
-                    borderRadius: '10px',
-                    marginBottom: '1.5rem',
-                    border: '1px solid #eee',
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h2 style={{ margin: 0, fontSize: '1.125rem' }}>Model Spend</h2>
-                        {usageLoading && <span style={{ color: '#666', fontSize: '0.875rem' }}>Loading…</span>}
+            <section style={{ marginBottom: '2.5rem' }}>
+                <h2 style={{ marginBottom: '1rem' }}>New Run</h2>
+                <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem' }}>
+                    <textarea
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Describe the workflow you want to run"
+                        style={{
+                            width: '100%',
+                            minHeight: '120px',
+                            padding: '1rem',
+                            fontSize: '1rem',
+                            borderRadius: '8px',
+                            border: '1px solid #ddd',
+                            marginBottom: '1rem',
+                        }}
+                    />
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                            type="submit"
+                            disabled={loading || !query.trim()}
+                            style={{
+                                padding: '0.75rem 1.5rem',
+                                fontSize: '1rem',
+                                backgroundColor: '#0070f3',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                opacity: loading || !query.trim() ? 0.6 : 1,
+                            }}
+                        >
+                            {loading ? 'Processing...' : 'Submit'}
+                        </button>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <label htmlFor="project-select" style={{ fontSize: '0.875rem', color: '#555' }}>
+                                Project
+                            </label>
+                            <select
+                                id="project-select"
+                                value={selectedProjectId ?? ''}
+                                onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                                style={{
+                                    padding: '0.5rem',
+                                    borderRadius: '6px',
+                                    border: '1px solid #ddd',
+                                    minWidth: '220px',
+                                }}
+                            >
+                                <option value="">Default</option>
+                                {projects.map((project) => (
+                                    <option key={project.id} value={project.id}>
+                                        {project.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
+                </form>
+                {result && (
+                    <div
+                        style={{
+                            padding: '1rem',
+                            backgroundColor: '#f5f5f5',
+                            borderRadius: '8px',
+                        }}
+                    >
+                        <p>
+                            <strong>Task ID:</strong> {result.task_id}
+                        </p>
+                        <p>
+                            <strong>Status:</strong> {result.status}
+                        </p>
+                    </div>
+                )}
+            </section>
 
-                    {usageError && (
-                        <p style={{ color: '#b00020', marginTop: '0.75rem' }}>{usageError}</p>
-                    )}
-
-                    {usage && (
-                        <div style={{ marginTop: '0.75rem' }}>
-                            <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                                gap: '1rem',
-                            }}>
-                                <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px' }}>
-                                    <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>Daily spend</p>
-                                    <strong style={{ fontSize: '1.1rem' }}>
-                                        {formatCurrency(usage.budget.daily_spend)}
-                                    </strong>
-                                    <p style={{ margin: '0.25rem 0 0', color: '#666', fontSize: '0.8rem' }}>
-                                        Remaining {formatCurrency(usage.budget.daily_remaining)}
-                                    </p>
-                                </div>
-                                <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px' }}>
-                                    <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>Monthly spend</p>
-                                    <strong style={{ fontSize: '1.1rem' }}>
-                                        {formatCurrency(usage.budget.monthly_spend)}
-                                    </strong>
-                                    <p style={{ margin: '0.25rem 0 0', color: '#666', fontSize: '0.8rem' }}>
-                                        Remaining {formatCurrency(usage.budget.monthly_remaining)}
-                                    </p>
-                                </div>
-                                <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px' }}>
-                                    <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>Cloud access</p>
-                                    <strong style={{ fontSize: '1.1rem' }}>
-                                        {usage.budget.can_use_cloud ? 'Available' : 'Restricted'}
-                                    </strong>
-                                    <p style={{ margin: '0.25rem 0 0', color: '#666', fontSize: '0.8rem' }}>
-                                        {usage.budget.daily_warning || usage.budget.monthly_warning
-                                            ? 'Budget warning active'
-                                            : 'Within budget'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div style={{ marginTop: '1rem' }}>
-                                <p style={{ marginBottom: '0.5rem', fontWeight: 600 }}>Spend by model</p>
-                                {Object.keys(usage.usage.by_model).length === 0 ? (
-                                    <p style={{ margin: 0, color: '#666' }}>No cloud spend recorded yet.</p>
-                                ) : (
-                                    <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                                        {Object.entries(usage.usage.by_model).map(([model, cost]) => (
-                                            <li key={model} style={{ marginBottom: '0.25rem' }}>
-                                                <strong>{model}</strong>: {formatCurrency(cost)}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </div>
+            <section style={{ marginBottom: '2.5rem', display: 'grid', gap: '1.5rem' }}>
+                <div style={cardStyle}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 style={{ margin: 0 }}>Project List</h2>
+                        <button
+                            type="button"
+                            onClick={fetchProjects}
+                            style={{
+                                padding: '0.4rem 0.75rem',
+                                borderRadius: '6px',
+                                border: '1px solid #ddd',
+                                backgroundColor: 'white',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem',
+                            }}
+                        >
+                            Refresh
+                        </button>
+                    </div>
+                    {projectLoading ? (
+                        <p style={{ color: '#666' }}>Loading projects...</p>
+                    ) : (
+                        <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
+                            {projects.length === 0 ? (
+                                <p style={{ color: '#666' }}>No projects yet. Submit a run to create one.</p>
+                            ) : (
+                                projects.map((project) => (
+                                    <div
+                                        key={project.id}
+                                        style={{
+                                            padding: '0.75rem',
+                                            borderRadius: '8px',
+                                            border: project.id === selectedProjectId ? '1px solid #0070f3' : '1px solid #eee',
+                                            backgroundColor: project.id === selectedProjectId ? '#f0f6ff' : '#fafafa',
+                                            cursor: 'pointer',
+                                        }}
+                                        onClick={() => setSelectedProjectId(project.id)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') setSelectedProjectId(project.id);
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <div>
+                                                <strong>{project.name}</strong>
+                                                <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>{project.type}</p>
+                                            </div>
+                                            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#666' }}>
+                                                <div>{project.status}</div>
+                                                <div>{new Date(project.last_activity).toLocaleString()}</div>
+                                            </div>
+                                        </div>
+                                        <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#999' }}>
+                                            Threads: {project.threads.length}
+                                        </p>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     )}
                 </div>
             )}
 
-            {/* Query form */}
-            <form onSubmit={handleSubmit} style={{ marginBottom: '2rem' }}>
-                <textarea
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="What would you like help with?"
-                    style={{
-                        width: '100%',
-                        minHeight: '120px',
-                        padding: '1rem',
-                        fontSize: '1rem',
-                        borderRadius: '8px',
-                        border: '1px solid #ddd',
-                        marginBottom: '1rem',
-                    }}
-                />
-                <button
-                    type="submit"
-                    disabled={loading || !query.trim()}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        fontSize: '1rem',
-                        backgroundColor: '#0070f3',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        opacity: loading || !query.trim() ? 0.6 : 1,
-                    }}
-                >
-                    {loading ? 'Processing...' : 'Submit'}
-                </button>
-            </form>
+            <section style={{ marginTop: '3rem' }}>
+                <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Operational Dashboards</h2>
+                {!isAuthenticated && (
+                    <p style={{ color: '#666' }}>Sign in to view run history, budgets, and error trends.</p>
+                )}
+                {isAuthenticated && dashboardError && (
+                    <p style={{ color: 'red' }}>{dashboardError}</p>
+                )}
+                {isAuthenticated && dashboardLoading && (
+                    <p style={{ color: '#666' }}>Loading dashboard data...</p>
+                )}
 
-            {result && (
-                <div
-                    style={{
-                        padding: '1rem',
-                        backgroundColor: '#f5f5f5',
-                        borderRadius: '8px',
-                    }}
-                >
-                    <p>
-                        <strong>Task ID:</strong> {result.task_id}
-                    </p>
-                    <p>
-                        <strong>Status:</strong> {result.status}
-                    </p>
-                </div>
-            )}
+                {isAuthenticated && !dashboardLoading && (
+                    <div style={{ display: 'grid', gap: '1.5rem' }}>
+                        <div style={{ border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Run History</h3>
+                            {runHistory.length === 0 ? (
+                                <p style={{ color: '#666' }}>No runs yet.</p>
+                            ) : (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ textAlign: 'left', color: '#666' }}>
+                                            <th style={{ paddingBottom: '0.5rem' }}>Run</th>
+                                            <th style={{ paddingBottom: '0.5rem' }}>Status</th>
+                                            <th style={{ paddingBottom: '0.5rem' }}>Created</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {runHistory.slice(0, 6).map((run) => (
+                                            <tr key={run.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                                                <td style={{ padding: '0.5rem 0', fontWeight: 500 }}>{run.id}</td>
+                                                <td style={{ padding: '0.5rem 0', textTransform: 'capitalize' }}>{run.status}</td>
+                                                <td style={{ padding: '0.5rem 0', color: '#666' }}>{new Date(run.created_at).toLocaleString()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+
+                        <div style={{ border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Budget Usage</h3>
+                            {budgetSummary ? (
+                                <>
+                                    <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+                                        <div>
+                                            <p style={{ margin: 0, color: '#666' }}>Daily Spend</p>
+                                            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
+                                                {formatCurrency(budgetSummary.status.daily_spend)}
+                                            </p>
+                                            <p style={{ margin: 0, color: budgetSummary.status.daily_warning ? '#d97706' : '#666' }}>
+                                                Remaining: {formatCurrency(budgetSummary.status.daily_remaining)}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p style={{ margin: 0, color: '#666' }}>Monthly Spend</p>
+                                            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
+                                                {formatCurrency(budgetSummary.status.monthly_spend)}
+                                            </p>
+                                            <p style={{ margin: 0, color: budgetSummary.status.monthly_warning ? '#d97706' : '#666' }}>
+                                                Remaining: {formatCurrency(budgetSummary.status.monthly_remaining)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div style={{ marginTop: '1rem' }}>
+                                        <p style={{ marginBottom: '0.5rem', color: '#666' }}>Spend by Model (Monthly)</p>
+                                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                            {Object.entries(budgetSummary.usage.by_model).map(([model, spend]) => (
+                                                <li key={model} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
+                                                    <span>{model}</span>
+                                                    <span style={{ fontWeight: 500 }}>{formatCurrency(spend)}</span>
+                                                </li>
+                                            ))}
+                                            {Object.keys(budgetSummary.usage.by_model).length === 0 && (
+                                                <li style={{ color: '#666' }}>No spend recorded yet.</li>
+                                            )}
+                                        </ul>
+                                    </div>
+                                </>
+                            ) : (
+                                <p style={{ color: '#666' }}>Budget data unavailable.</p>
+                            )}
+                        </div>
+
+                        <div style={{ border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Error Trends (Last 7 Days)</h3>
+                            {activityMetrics ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                    {activityMetrics.days.map((day) => {
+                                        const totalErrors = Object.values(day.errors).reduce((sum, value) => sum + value, 0);
+                                        const barWidth = Math.min(totalErrors * 20, 240);
+                                        return (
+                                            <div key={day.date} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <span style={{ width: '90px', fontSize: '0.8rem', color: '#666' }}>{day.date}</span>
+                                                <div style={{ flex: 1, backgroundColor: '#f3f4f6', borderRadius: '999px', overflow: 'hidden' }}>
+                                                    <div style={{ width: `${barWidth}px`, height: '8px', backgroundColor: totalErrors > 0 ? '#ef4444' : '#a3a3a3' }} />
+                                                </div>
+                                                <span style={{ minWidth: '24px', textAlign: 'right', fontSize: '0.8rem' }}>{totalErrors}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <p style={{ color: '#666' }}>No error data available.</p>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </section>
         </main>
     );
 }

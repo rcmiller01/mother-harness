@@ -83,7 +83,17 @@ export class DocumentProcessor {
 
         try {
             // Update job status to processing
-            await this.updateJobStatus(job.id, 'processing');
+            await this.updateJobStatus(job.id, 'processing', { started_at: new Date().toISOString() });
+
+            if (job.operation === 'delete') {
+                const removedChunks = await this.deleteDocumentChunks(job.library_id, job.file_path);
+                await this.updateLibraryStats(job.library_id, -removedChunks, -1);
+                await this.updateJobStatus(job.id, 'completed', {
+                    duration_ms: Date.now() - startTime,
+                    completed_at: new Date().toISOString(),
+                });
+                return { success: true, chunks: 0 };
+            }
 
             // Extract content from document
             const extraction = await this.extractDocument(job.file_path);
@@ -98,16 +108,23 @@ export class DocumentProcessor {
             // Generate embeddings using LLM client
             const chunksWithEmbeddings = await this.generateEmbeddings(chunks);
 
+            const removedChunks = job.operation === 'update'
+                ? await this.deleteDocumentChunks(job.library_id, job.file_path)
+                : 0;
+
             // Store chunks in Redis
             await this.storeChunks(job.library_id, job.file_path, extraction, chunksWithEmbeddings);
 
             // Update library stats
-            await this.updateLibraryStats(job.library_id, chunks.length);
+            const documentDelta = job.operation === 'ingest' ? 1 : 0;
+            const chunkDelta = chunks.length - removedChunks;
+            await this.updateLibraryStats(job.library_id, chunkDelta, documentDelta);
 
             // Update job status to completed
             await this.updateJobStatus(job.id, 'completed', {
                 chunks_created: chunks.length,
                 duration_ms: Date.now() - startTime,
+                completed_at: new Date().toISOString(),
             });
 
             console.log(`[Processor] Successfully processed ${job.file_path}: ${chunks.length} chunks`);
@@ -117,7 +134,10 @@ export class DocumentProcessor {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
             // Update job status to failed
-            await this.updateJobStatus(job.id, 'failed', { error: errorMessage });
+            await this.updateJobStatus(job.id, 'failed', {
+                error: errorMessage,
+                completed_at: new Date().toISOString(),
+            });
 
             // Handle failure (move to failed folder, alert)
             await this.handleFailure(job, errorMessage);
@@ -403,12 +423,24 @@ export class DocumentProcessor {
     /**
      * Update library statistics
      */
-    private async updateLibraryStats(libraryId: string, newChunks: number): Promise<void> {
+    private async updateLibraryStats(
+        libraryId: string,
+        chunkDelta: number,
+        documentDelta: number
+    ): Promise<void> {
         try {
             const library = await this.redis.get(`library:${libraryId}`) as Library | null;
             if (library) {
-                await this.redis.set(`library:${libraryId}`, '$.document_count', library.document_count + 1);
-                await this.redis.set(`library:${libraryId}`, '$.chunk_count', library.chunk_count + newChunks);
+                await this.redis.set(
+                    `library:${libraryId}`,
+                    '$.document_count',
+                    Math.max(0, library.document_count + documentDelta)
+                );
+                await this.redis.set(
+                    `library:${libraryId}`,
+                    '$.chunk_count',
+                    Math.max(0, library.chunk_count + chunkDelta)
+                );
                 await this.redis.set(`library:${libraryId}`, '$.last_scanned', new Date().toISOString());
             }
         } catch (error) {
@@ -426,6 +458,15 @@ export class DocumentProcessor {
     ): Promise<void> {
         const key = `docling_job:${jobId}`;
         try {
+            if (!(await this.redis.exists(key))) {
+                await this.redis.set(key, '$', {
+                    id: jobId,
+                    status,
+                    updated_at: new Date().toISOString(),
+                    ...(metadata ?? {}),
+                });
+                return;
+            }
             await this.redis.set(key, '$.status', status);
             await this.redis.set(key, '$.updated_at', new Date().toISOString());
 
@@ -437,6 +478,19 @@ export class DocumentProcessor {
         } catch (error) {
             console.warn('[Processor] Failed to update job status:', error);
         }
+    }
+
+    private async deleteDocumentChunks(libraryId: string, filePath: string): Promise<number> {
+        const chunkKeys = await this.redis.keys(`chunk:${libraryId}:*`);
+        let removed = 0;
+        for (const key of chunkKeys) {
+            const chunk = await this.redis.get<{ file_path?: string }>(key);
+            if (chunk?.file_path === filePath) {
+                await this.redis.del(key);
+                removed += 1;
+            }
+        }
+        return removed;
     }
 
     /**
