@@ -4,8 +4,8 @@
  */
 
 import chokidar from 'chokidar';
-import type { Library } from '@mother-harness/shared';
-import { getRedisClient } from '@mother-harness/shared';
+import type { DoclingJob, Library } from '@mother-harness/shared';
+import { getRedisClient, getRedisJSON } from '@mother-harness/shared';
 import { nanoid } from 'nanoid';
 
 /** Supported file extensions for ingestion */
@@ -17,20 +17,10 @@ const SUPPORTED_EXTENSIONS = [
 /** File event types */
 type FileEvent = 'add' | 'change' | 'unlink';
 
-/** Ingestion job to be published */
-interface IngestionJob {
-    id: string;
-    library_id: string;
-    library_name: string;
-    file_path: string;
-    event: FileEvent;
-    priority: 'high' | 'normal' | 'low';
-    created_at: string;
-}
-
 export class LibraryWatcher {
     private watchers: Map<string, chokidar.FSWatcher> = new Map();
     private redis = getRedisClient();
+    private redisJson = getRedisJSON();
     private readonly streamKey = 'stream:docling';
 
     /**
@@ -124,15 +114,22 @@ export class LibraryWatcher {
         filePath: string,
         event: FileEvent
     ): Promise<void> {
-        const job: IngestionJob = {
+        const operation: DoclingJob['operation'] =
+            event === 'add' ? 'ingest' : event === 'change' ? 'update' : 'delete';
+
+        const job: DoclingJob = {
             id: `job-${nanoid()}`,
             library_id: library.id,
             library_name: library.name,
             file_path: filePath,
-            event,
-            priority: event === 'add' ? 'normal' : event === 'change' ? 'normal' : 'low',
+            operation,
+            priority: event === 'unlink' ? 'low' : 'normal',
+            status: 'pending',
             created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
         };
+
+        await this.redisJson.set(`docling_job:${job.id}`, '$', job);
 
         // Add to Redis Stream
         await this.redis.xadd(
@@ -142,7 +139,7 @@ export class LibraryWatcher {
             JSON.stringify(job)
         );
 
-        console.log(`[Watcher] Published ${event} job for: ${filePath}`);
+        console.log(`[Watcher] Published ${operation} job for: ${filePath}`);
     }
 
     /**
