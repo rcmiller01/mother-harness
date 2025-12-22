@@ -12,6 +12,11 @@ Mother-Harness is a three-tiered agent orchestration system designed for complex
 - **Docling**: Multimodal document ingestion
 - **n8n**: Workflow automation + agent execution environment
 
+## Documentation
+
+- [Launch Readiness Checklist](docs/launch-readiness.md)
+- [Roadmap](docs/roadmap.md)
+
 ## Project Structure
 
 ```
