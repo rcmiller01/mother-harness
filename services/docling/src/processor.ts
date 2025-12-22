@@ -6,6 +6,7 @@
 import type { DocumentChunk, Library, DoclingJob } from '@mother-harness/shared';
 import { getRedisJSON, getLLMClient } from '@mother-harness/shared';
 import { nanoid } from 'nanoid';
+import pdfParse from 'pdf-parse';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
@@ -186,9 +187,9 @@ export class DocumentProcessor {
             };
         }
 
-        // For PDFs and other binary formats, try Docling API
+        // For PDFs and other binary formats, try Docling API then fallback to local parsing
         if (extension === '.pdf') {
-            return this.extractWithDoclingApi(resolvedPath, stats);
+            return this.extractPdf(resolvedPath, stats);
         }
 
         // Fallback: try to read as text
@@ -258,6 +259,53 @@ export class DocumentProcessor {
             const message = error instanceof Error ? error.message : 'Unknown error';
             throw new Error(`PDF extraction failed: ${message}. Ensure Docling API is running.`);
         }
+    }
+
+    /**
+     * Extract PDF using Docling API with fallback to local parsing
+     */
+    private async extractPdf(
+        filePath: string,
+        stats: Awaited<ReturnType<typeof fs.stat>>
+    ): Promise<ExtractionResult> {
+        try {
+            return await this.extractWithDoclingApi(filePath, stats);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            console.warn(`[Processor] Docling API failed for ${filePath}: ${message}. Falling back to local PDF parsing.`);
+            return this.extractWithPdfParse(filePath, stats);
+        }
+    }
+
+    /**
+     * Extract PDF using local pdf-parse fallback
+     */
+    private async extractWithPdfParse(
+        filePath: string,
+        stats: Awaited<ReturnType<typeof fs.stat>>
+    ): Promise<ExtractionResult> {
+        const fileBuffer = await fs.readFile(filePath);
+        const parsed = await pdfParse(fileBuffer);
+        const rawText = parsed.text?.trim() ?? '';
+        const pageTexts = rawText.split('\f').map(page => page.trim()).filter(Boolean);
+        const resolvedPages = pageTexts.length > 0 ? pageTexts : (rawText ? [rawText] : ['']);
+
+        const pages = resolvedPages.map((content, index) => ({
+            page_number: index + 1,
+            content,
+        }));
+
+        return {
+            text: pages.map(p => p.content).join('\n\n'),
+            pages,
+            metadata: {
+                title: parsed.info?.Title ?? path.basename(filePath, '.pdf'),
+                author: parsed.info?.Author,
+                page_count: parsed.numpages ?? pages.length,
+                file_type: 'pdf',
+                file_size: stats.size,
+            },
+        };
     }
 
     /**

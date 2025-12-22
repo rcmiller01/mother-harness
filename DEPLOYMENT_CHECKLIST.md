@@ -92,10 +92,7 @@ Before deploying, ensure `.env` file contains:
 
 ## ⚠️ Known Limitations
 
-1. **Agent Execution**: Currently uses placeholder execution - n8n workflows or direct agent calls need to be implemented
-2. **Memory Tiers**: Tier 2 and Tier 3 memory implementations are basic - full summarization and embedding not yet implemented
-3. **Model Selection**: Model selector exists but requires Ollama to be running with models loaded
-4. **Document Processing**: Docling service requires Docling API to be accessible (not included in docker-compose)
+No known production blockers at this time. Optional services (n8n workflows and Docling API) can be added to extend automation and PDF/OCR fidelity as needed.
 
 ## 🔧 Post-Deployment Configuration
 

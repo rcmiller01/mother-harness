@@ -15,6 +15,7 @@ export interface AgentContext {
     user_id: string;
     recent_context?: string;
     rag_context?: string;
+    library_ids?: string[];
 }
 
 /** Agent execution result */
