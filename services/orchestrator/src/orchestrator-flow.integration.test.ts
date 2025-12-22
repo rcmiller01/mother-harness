@@ -101,11 +101,12 @@ vi.mock('@mother-harness/shared', async () => {
 });
 
 import { N8nAdapter } from './n8n-adapter.js';
-import { Orchestrator, registerAgentExecutor } from './orchestrator.js';
+import { Orchestrator, clearAgentExecutors, registerAgentExecutor } from './orchestrator.js';
 
 describe('Orchestrator ↔ n8n ↔ agents ↔ Redis integration', () => {
     beforeEach(() => {
         redisStore.clear();
+        clearAgentExecutors();
         vi.clearAllMocks();
     });
 
@@ -160,5 +161,25 @@ describe('Orchestrator ↔ n8n ↔ agents ↔ Redis integration', () => {
             expect.stringContaining('/webhook/agent-run'),
             expect.objectContaining({ method: 'POST' })
         );
+    });
+
+    it('fails when workflows error and no executor is registered', async () => {
+        const fetchMock = vi.fn(async () => ({
+            ok: false,
+            status: 500,
+            text: async () => 'workflow down',
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        const orchestrator = new Orchestrator();
+        const task = await orchestrator.createTask('user-1', 'Research onboarding metrics');
+
+        await orchestrator.executeTask(task.id);
+
+        const stored = await orchestrator.getTask(task.id);
+        expect(stored?.status).toBe('failed');
+        expect(stored?.todo_list[0]?.status).toBe('failed');
+        expect(fetchMock).toHaveBeenCalled();
     });
 });
