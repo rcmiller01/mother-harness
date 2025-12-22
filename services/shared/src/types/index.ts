@@ -69,3 +69,6 @@ export type {
     ResultEnvelope,
 } from './result.js';
 export { createSuccessResult, createErrorResult } from './result.js';
+
+// Run types
+export type { RunStatus, Run } from './run.js';

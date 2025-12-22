@@ -11,6 +11,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 /** Approval request - stored in Redis as approval:{id} */
 export interface Approval {
     id: string;
+    run_id: string;
     task_id: string;
     project_id: string;
     step_id: string;
@@ -52,6 +53,7 @@ export interface ApiCallPreview {
 /** Create a new approval request */
 export function createApproval(
     id: string,
+    runId: string,
     taskId: string,
     projectId: string,
     stepId: string,
@@ -64,6 +66,7 @@ export function createApproval(
     const now = new Date().toISOString();
     return {
         id,
+        run_id: runId,
         task_id: taskId,
         project_id: projectId,
         step_id: stepId,

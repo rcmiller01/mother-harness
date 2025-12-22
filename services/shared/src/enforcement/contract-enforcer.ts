@@ -180,6 +180,7 @@ export class ContractEnforcer {
     async createApprovalIfNeeded(
         task: Task,
         step: TodoItem,
+        runId: string,
         action: string,
         preview: Approval['preview']
     ): Promise<Approval | null> {
@@ -191,6 +192,7 @@ export class ContractEnforcer {
 
         const approval = createApproval(
             `approval-${nanoid()}`,
+            runId,
             task.id,
             task.project_id,
             step.id,

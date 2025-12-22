@@ -48,22 +48,100 @@ app.post('/api/ask', async (request, reply) => {
     const body = request.body as { query: string; project_id?: string; user_id: string };
 
     try {
-        const task = await orchestrator.createTask(
+        const { run, task } = await orchestrator.createRun(
             body.user_id,
             body.query,
             body.project_id
         );
 
         // Start execution in background
-        orchestrator.executeTask(task.id).catch((err) => {
-            app.log.error({ task_id: task.id, error: err }, 'Task execution failed');
+        orchestrator.executeRun(run.id).catch((err) => {
+            app.log.error({ run_id: run.id, error: err }, 'Run execution failed');
         });
 
-        return { task_id: task.id, status: task.status };
+        return { run_id: run.id, task_id: task.id, status: run.status };
     } catch (error) {
         app.log.error(error, 'Failed to create task');
         reply.status(500);
         return { error: 'Failed to create task' };
+    }
+});
+
+app.post('/api/runs', async (request, reply) => {
+    const body = request.body as { query: string; project_id?: string; user_id: string };
+
+    try {
+        const { run, task } = await orchestrator.createRun(
+            body.user_id,
+            body.query,
+            body.project_id
+        );
+
+        orchestrator.executeRun(run.id).catch((err) => {
+            app.log.error({ run_id: run.id, error: err }, 'Run execution failed');
+        });
+
+        return { run_id: run.id, task_id: task.id, status: run.status };
+    } catch (error) {
+        app.log.error(error, 'Failed to submit run');
+        reply.status(500);
+        return { error: 'Failed to submit run' };
+    }
+});
+
+app.get('/api/runs', async (request) => {
+    const { user_id } = request.query as { user_id: string };
+    return await orchestrator.listRuns(user_id);
+});
+
+app.get('/api/runs/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+        const run = await orchestrator.getRun(id);
+        if (!run) {
+            reply.status(404);
+            return { error: 'Run not found' };
+        }
+        return run;
+    } catch (error) {
+        app.log.error(error, 'Failed to get run');
+        reply.status(500);
+        return { error: 'Failed to get run' };
+    }
+});
+
+app.get('/api/runs/:id/artifacts', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+        const artifacts = await orchestrator.getRunArtifacts(id);
+        if (!artifacts) {
+            reply.status(404);
+            return { error: 'Run not found' };
+        }
+        return artifacts;
+    } catch (error) {
+        app.log.error(error, 'Failed to get run artifacts');
+        reply.status(500);
+        return { error: 'Failed to get run artifacts' };
+    }
+});
+
+app.get('/api/artifacts/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+        const artifact = await orchestrator.getArtifact(id);
+        if (!artifact) {
+            reply.status(404);
+            return { error: 'Artifact not found' };
+        }
+        return artifact;
+    } catch (error) {
+        app.log.error(error, 'Failed to get artifact');
+        reply.status(500);
+        return { error: 'Failed to get artifact' };
     }
 });
 
