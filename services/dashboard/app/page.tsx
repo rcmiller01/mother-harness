@@ -49,11 +49,151 @@ export default function HomePage() {
     const [dashboardLoading, setDashboardLoading] = useState(false);
     const [dashboardError, setDashboardError] = useState('');
 
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [projectLoading, setProjectLoading] = useState(false);
+    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+    const [runs, setRuns] = useState<Run[]>([]);
+    const [runsLoading, setRunsLoading] = useState(false);
+    const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+    const [artifactLoading, setArtifactLoading] = useState(false);
+    const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
+
+    const [libraries, setLibraries] = useState<Library[]>([]);
+    const [libraryLoading, setLibraryLoading] = useState(false);
+    const [librarySearch, setLibrarySearch] = useState('');
+    const [libraryName, setLibraryName] = useState('');
+    const [libraryPath, setLibraryPath] = useState('');
+    const [libraryDescription, setLibraryDescription] = useState('');
+    const [libraryAutoScan, setLibraryAutoScan] = useState(true);
+    const [libraryMessage, setLibraryMessage] = useState('');
+
+    const [approvals, setApprovals] = useState<Approval[]>([]);
+    const [approvalsLoading, setApprovalsLoading] = useState(false);
+    const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
+    const [approvalMessage, setApprovalMessage] = useState('');
+
     // Login form state
     const [showLogin, setShowLogin] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
+
+    const userId = user?.id ?? 'anonymous';
+
+    const fetchProjects = async () => {
+        if (!user?.id) return;
+        setProjectLoading(true);
+        try {
+            const response = await fetch(`/api/projects?user_id=${encodeURIComponent(user.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setProjects(data);
+            if (!selectedProjectId && data.length > 0) {
+                setSelectedProjectId(data[0].id);
+            }
+        } catch (error) {
+            console.error('Failed to load projects:', error);
+        } finally {
+            setProjectLoading(false);
+        }
+    };
+
+    const fetchRuns = async () => {
+        if (!user?.id) return;
+        setRunsLoading(true);
+        try {
+            const response = await fetch(`/api/runs?user_id=${encodeURIComponent(user.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setRuns(data);
+            if (!selectedRunId && data.length > 0) {
+                setSelectedRunId(data[0].id);
+            }
+        } catch (error) {
+            console.error('Failed to load runs:', error);
+        } finally {
+            setRunsLoading(false);
+        }
+    };
+
+    const fetchArtifacts = async (runId: string) => {
+        setArtifactLoading(true);
+        try {
+            const response = await fetch(`/api/runs/${runId}/artifacts`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setArtifacts(data);
+            setSelectedArtifact(null);
+        } catch (error) {
+            console.error('Failed to load artifacts:', error);
+        } finally {
+            setArtifactLoading(false);
+        }
+    };
+
+    const fetchArtifactDetail = async (artifactId: string) => {
+        try {
+            const response = await fetch(`/api/artifacts/${artifactId}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setSelectedArtifact(data);
+        } catch (error) {
+            console.error('Failed to load artifact:', error);
+        }
+    };
+
+    const fetchLibraries = async (search = '') => {
+        setLibraryLoading(true);
+        try {
+            const params = search ? `?search=${encodeURIComponent(search)}` : '';
+            const response = await fetch(`/api/libraries${params}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setLibraries(data);
+        } catch (error) {
+            console.error('Failed to load libraries:', error);
+        } finally {
+            setLibraryLoading(false);
+        }
+    };
+
+    const fetchApprovals = async () => {
+        if (!user?.id) return;
+        setApprovalsLoading(true);
+        try {
+            const response = await fetch(`/api/approvals/pending?user_id=${encodeURIComponent(user.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+            setApprovals(data);
+        } catch (error) {
+            console.error('Failed to load approvals:', error);
+        } finally {
+            setApprovalsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) return;
+        fetchProjects();
+        fetchRuns();
+        fetchLibraries();
+        fetchApprovals();
+    }, [isAuthenticated, user?.id]);
+
+    useEffect(() => {
+        if (selectedRunId) {
+            fetchArtifacts(selectedRunId);
+        }
+    }, [selectedRunId]);
 
     const handleLogin = async (e: FormEvent) => {
         e.preventDefault();
@@ -81,12 +221,14 @@ export default function HomePage() {
                 },
                 body: JSON.stringify({
                     query,
-                    user_id: user?.id ?? 'anonymous',
+                    user_id: userId,
+                    project_id: selectedProjectId ?? undefined,
                 }),
             });
 
             const data = await response.json();
             setResult(data);
+            fetchRuns();
         } catch (error) {
             console.error('Failed to submit:', error);
         } finally {
@@ -146,7 +288,7 @@ export default function HomePage() {
     }
 
     return (
-        <main style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
+        <main style={{ padding: '2rem', maxWidth: '1100px', margin: '0 auto' }}>
             {/* Header with auth controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div>
@@ -302,54 +444,144 @@ export default function HomePage() {
                 </div>
             )}
 
-            {/* Query form */}
-            <form onSubmit={handleSubmit} style={{ marginBottom: '2rem' }}>
-                <textarea
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="What would you like help with?"
-                    style={{
-                        width: '100%',
-                        minHeight: '120px',
-                        padding: '1rem',
-                        fontSize: '1rem',
-                        borderRadius: '8px',
-                        border: '1px solid #ddd',
-                        marginBottom: '1rem',
-                    }}
-                />
-                <button
-                    type="submit"
-                    disabled={loading || !query.trim()}
-                    style={{
-                        padding: '0.75rem 1.5rem',
-                        fontSize: '1rem',
-                        backgroundColor: '#0070f3',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        opacity: loading || !query.trim() ? 0.6 : 1,
-                    }}
-                >
-                    {loading ? 'Processing...' : 'Submit'}
-                </button>
-            </form>
+            <section style={{ marginBottom: '2.5rem' }}>
+                <h2 style={{ marginBottom: '1rem' }}>New Run</h2>
+                <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem' }}>
+                    <textarea
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Describe the workflow you want to run"
+                        style={{
+                            width: '100%',
+                            minHeight: '120px',
+                            padding: '1rem',
+                            fontSize: '1rem',
+                            borderRadius: '8px',
+                            border: '1px solid #ddd',
+                            marginBottom: '1rem',
+                        }}
+                    />
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                            type="submit"
+                            disabled={loading || !query.trim()}
+                            style={{
+                                padding: '0.75rem 1.5rem',
+                                fontSize: '1rem',
+                                backgroundColor: '#0070f3',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                opacity: loading || !query.trim() ? 0.6 : 1,
+                            }}
+                        >
+                            {loading ? 'Processing...' : 'Submit'}
+                        </button>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <label htmlFor="project-select" style={{ fontSize: '0.875rem', color: '#555' }}>
+                                Project
+                            </label>
+                            <select
+                                id="project-select"
+                                value={selectedProjectId ?? ''}
+                                onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                                style={{
+                                    padding: '0.5rem',
+                                    borderRadius: '6px',
+                                    border: '1px solid #ddd',
+                                    minWidth: '220px',
+                                }}
+                            >
+                                <option value="">Default</option>
+                                {projects.map((project) => (
+                                    <option key={project.id} value={project.id}>
+                                        {project.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </form>
+                {result && (
+                    <div
+                        style={{
+                            padding: '1rem',
+                            backgroundColor: '#f5f5f5',
+                            borderRadius: '8px',
+                        }}
+                    >
+                        <p>
+                            <strong>Task ID:</strong> {result.task_id}
+                        </p>
+                        <p>
+                            <strong>Status:</strong> {result.status}
+                        </p>
+                    </div>
+                )}
+            </section>
 
-            {result && (
-                <div
-                    style={{
-                        padding: '1rem',
-                        backgroundColor: '#f5f5f5',
-                        borderRadius: '8px',
-                    }}
-                >
-                    <p>
-                        <strong>Task ID:</strong> {result.task_id}
-                    </p>
-                    <p>
-                        <strong>Status:</strong> {result.status}
-                    </p>
+            <section style={{ marginBottom: '2.5rem', display: 'grid', gap: '1.5rem' }}>
+                <div style={cardStyle}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 style={{ margin: 0 }}>Project List</h2>
+                        <button
+                            type="button"
+                            onClick={fetchProjects}
+                            style={{
+                                padding: '0.4rem 0.75rem',
+                                borderRadius: '6px',
+                                border: '1px solid #ddd',
+                                backgroundColor: 'white',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem',
+                            }}
+                        >
+                            Refresh
+                        </button>
+                    </div>
+                    {projectLoading ? (
+                        <p style={{ color: '#666' }}>Loading projects...</p>
+                    ) : (
+                        <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
+                            {projects.length === 0 ? (
+                                <p style={{ color: '#666' }}>No projects yet. Submit a run to create one.</p>
+                            ) : (
+                                projects.map((project) => (
+                                    <div
+                                        key={project.id}
+                                        style={{
+                                            padding: '0.75rem',
+                                            borderRadius: '8px',
+                                            border: project.id === selectedProjectId ? '1px solid #0070f3' : '1px solid #eee',
+                                            backgroundColor: project.id === selectedProjectId ? '#f0f6ff' : '#fafafa',
+                                            cursor: 'pointer',
+                                        }}
+                                        onClick={() => setSelectedProjectId(project.id)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') setSelectedProjectId(project.id);
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <div>
+                                                <strong>{project.name}</strong>
+                                                <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>{project.type}</p>
+                                            </div>
+                                            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#666' }}>
+                                                <div>{project.status}</div>
+                                                <div>{new Date(project.last_activity).toLocaleString()}</div>
+                                            </div>
+                                        </div>
+                                        <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#999' }}>
+                                            Threads: {project.threads.length}
+                                        </p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 

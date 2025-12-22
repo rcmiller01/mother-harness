@@ -232,6 +232,59 @@ app.post('/api/approvals/:id/respond', { preHandler: requireRole('approver', 'ad
     }
 });
 
+app.get('/api/libraries', async (request, reply) => {
+    const { search } = request.query as { search?: string };
+
+    try {
+        return await orchestrator.listLibraries(search);
+    } catch (error) {
+        app.log.error(error, 'Failed to list libraries');
+        reply.status(500);
+        return { error: 'Failed to list libraries' };
+    }
+});
+
+app.post('/api/libraries', async (request, reply) => {
+    const body = request.body as {
+        name: string;
+        folder_path: string;
+        description?: string;
+        auto_scan?: boolean;
+    };
+
+    try {
+        const library = await orchestrator.createLibrary(
+            body.name,
+            body.folder_path,
+            body.description,
+            body.auto_scan ?? true
+        );
+        reply.status(201);
+        return library;
+    } catch (error) {
+        app.log.error(error, 'Failed to create library');
+        reply.status(500);
+        return { error: 'Failed to create library' };
+    }
+});
+
+app.post('/api/libraries/:id/rescan', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+        const library = await orchestrator.rescanLibrary(id);
+        if (!library) {
+            reply.status(404);
+            return { error: 'Library not found' };
+        }
+        return library;
+    } catch (error) {
+        app.log.error(error, 'Failed to rescan library');
+        reply.status(500);
+        return { error: 'Failed to rescan library' };
+    }
+});
+
 // WebSocket endpoint for real-time task updates
 app.get('/ws', { websocket: true, preHandler: requireRole('user', 'admin') }, (connection, request) => {
     const { socket } = connection;
