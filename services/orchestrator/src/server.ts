@@ -19,6 +19,7 @@ import { Orchestrator } from './orchestrator.js';
 import { getCostTracker } from './cost-tracker.js';
 import { config } from './config.js';
 import { registerAuth, requireRole, type UserSession } from './auth.js';
+import { registerProductionExecutors } from './executors/index.js';
 
 // Create Fastify instance
 const app = Fastify({
@@ -388,6 +389,7 @@ async function start() {
     try {
         await registerPlugins();
         await initializeRedis();
+        registerProductionExecutors();
 
         // Initialize orchestrator
         orchestrator = new Orchestrator();

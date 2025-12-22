@@ -58,6 +58,14 @@ export function registerAgentExecutor(agentType: AgentType, executor: AgentExecu
     agentExecutors.set(agentType, executor);
 }
 
+export function clearAgentExecutors(): void {
+    agentExecutors.clear();
+}
+
+export function hasAgentExecutor(agentType: AgentType): boolean {
+    return agentExecutors.has(agentType);
+}
+
 export class Orchestrator {
     private redis = getRedisJSON();
     private planner = new TaskPlanner();
@@ -579,33 +587,6 @@ export class Orchestrator {
 
         if (!allowlistValidation.valid) {
             throw new Error(allowlistValidation.errors.join('; '));
-        }
-
-        if (!executor) {
-            console.warn(`No executor registered for agent: ${step.agent}`);
-            const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
-                step.agent,
-                []
-            );
-
-            if (!requiredArtifactsValidation.valid) {
-                throw new Error(requiredArtifactsValidation.errors.join('; '));
-            }
-
-            // Return placeholder result
-            return {
-                success: true,
-                outputs: {
-                    agent: step.agent,
-                    description: step.description,
-                    executed_at: new Date().toISOString(),
-                    note: 'No agent executor registered - using placeholder',
-                },
-                artifacts: [],
-                explanation: `Executed step: ${step.description}`,
-                tokens_used: 0,
-                duration_ms: 0,
-            };
         }
 
         // Build context for agent
