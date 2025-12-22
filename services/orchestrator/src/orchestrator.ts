@@ -21,6 +21,7 @@ import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
 import { Tier2Memory } from './memory/tier2-summaries.js';
 import { Tier3Memory } from './memory/tier3-longterm.js';
+import { getN8nAdapter, type WorkflowResult } from './n8n-adapter.js';
 
 /** Agent dispatch result */
 interface AgentResult {
@@ -50,6 +51,7 @@ export class Orchestrator {
     private tier1 = new Tier1Memory();
     private tier2 = new Tier2Memory();
     private tier3 = new Tier3Memory();
+    private n8nAdapter = getN8nAdapter();
 
     /**
      * Create a new task from user query
@@ -183,23 +185,6 @@ export class Orchestrator {
     private async executeStep(task: Task, step: TodoItem): Promise<AgentResult> {
         const executor = agentExecutors.get(step.agent);
 
-        if (!executor) {
-            console.warn(`No executor registered for agent: ${step.agent}`);
-            // Return placeholder result
-            return {
-                success: true,
-                outputs: {
-                    agent: step.agent,
-                    description: step.description,
-                    executed_at: new Date().toISOString(),
-                    note: 'No agent executor registered - using placeholder',
-                },
-                explanation: `Executed step: ${step.description}`,
-                tokens_used: 0,
-                duration_ms: 0,
-            };
-        }
-
         // Build context for agent
         const recentContext = await this.tier1.getContextString(task.id);
         const longTermContext = await this.tier3.getContextString(task.project_id, step.description);
@@ -214,12 +199,92 @@ export class Orchestrator {
             library_ids: [], // Would be populated from project settings
         };
 
-        // Execute the agent
+        const workflowResult = await this.n8nAdapter.triggerWorkflow(
+            step.agent,
+            {
+                task_id: task.id,
+                step_id: step.id,
+                agent: step.agent,
+                inputs: step.description,
+                context,
+            },
+            {
+                fallback_to_direct: true,
+            }
+        );
+
+        if (workflowResult.success) {
+            return this.normalizeWorkflowResult(step, workflowResult);
+        }
+
+        if (!executor) {
+            console.warn(`No executor registered for agent: ${step.agent}`);
+            throw new Error(
+                workflowResult.error?.message
+                    ?? `Workflow failed and no executor registered for agent: ${step.agent}`
+            );
+        }
+
+        // Execute the agent directly
         const startTime = Date.now();
         const result = await executor(step.description, context);
         result.duration_ms = Date.now() - startTime;
+        result.outputs = {
+            ...(result.outputs ?? {}),
+            workflow_error: workflowResult.error,
+        };
 
         return result;
+    }
+
+    private normalizeWorkflowResult(step: TodoItem, workflowResult: WorkflowResult): AgentResult {
+        const outputs: Record<string, unknown> = {
+            workflow_data: workflowResult.data,
+            workflow_execution_id: workflowResult.execution_id,
+        };
+
+        const agentResult: AgentResult = {
+            success: true,
+            outputs,
+            explanation: `Executed step via workflow: ${step.description}`,
+            tokens_used: 0,
+            duration_ms: workflowResult.duration_ms,
+        };
+
+        if (workflowResult.data && typeof workflowResult.data === 'object') {
+            const payload = workflowResult.data as {
+                outputs?: Record<string, unknown>;
+                explanation?: string;
+                tokens_used?: number;
+                duration_ms?: number;
+                success?: boolean;
+            };
+
+            if (payload.outputs && typeof payload.outputs === 'object') {
+                agentResult.outputs = {
+                    ...outputs,
+                    ...payload.outputs,
+                };
+            }
+
+            if (typeof payload.explanation === 'string') {
+                agentResult.explanation = payload.explanation;
+            }
+
+            if (typeof payload.tokens_used === 'number') {
+                agentResult.tokens_used = payload.tokens_used;
+            }
+
+            if (typeof payload.duration_ms === 'number') {
+                agentResult.duration_ms = payload.duration_ms;
+            }
+
+            if (typeof payload.success === 'boolean') {
+                agentResult.success = payload.success;
+            }
+        }
+
+        return agentResult;
     }
 
     /**
