@@ -1,13 +1,33 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useAuth, getAuthHeaders } from '../lib/auth';
+
+interface UsagePayload {
+    budget: {
+        daily_spend: number;
+        monthly_spend: number;
+        daily_remaining: number;
+        monthly_remaining: number;
+        daily_warning: boolean;
+        monthly_warning: boolean;
+        can_use_cloud: boolean;
+    };
+    usage: {
+        daily: Record<string, number>;
+        monthly: Record<string, number>;
+        by_model: Record<string, number>;
+    };
+}
 
 export default function HomePage() {
     const { user, loading: authLoading, isAuthenticated, login, logout } = useAuth();
     const [query, setQuery] = useState('');
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<{ task_id: string; status: string } | null>(null);
+    const [usage, setUsage] = useState<UsagePayload | null>(null);
+    const [usageLoading, setUsageLoading] = useState(false);
+    const [usageError, setUsageError] = useState('');
 
     // Login form state
     const [showLogin, setShowLogin] = useState(false);
@@ -53,6 +73,42 @@ export default function HomePage() {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        const fetchUsage = async () => {
+            if (!isAuthenticated || !user?.id) {
+                setUsage(null);
+                return;
+            }
+
+            setUsageLoading(true);
+            setUsageError('');
+
+            try {
+                const response = await fetch(`/api/usage?user_id=${encodeURIComponent(user.id)}`, {
+                    headers: {
+                        ...getAuthHeaders(),
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load usage');
+                }
+
+                const data = await response.json() as UsagePayload;
+                setUsage(data);
+            } catch (error) {
+                setUsageError(error instanceof Error ? error.message : 'Failed to load usage');
+                setUsage(null);
+            } finally {
+                setUsageLoading(false);
+            }
+        };
+
+        fetchUsage();
+    }, [isAuthenticated, user?.id]);
+
+    const formatCurrency = (value: number) => `$${value.toFixed(2)}`;
 
     if (authLoading) {
         return (
@@ -215,6 +271,80 @@ export default function HomePage() {
                     ✓ Authenticated as <strong>{user?.email ?? user?.id}</strong>
                     {user?.roles && user.roles.length > 0 && (
                         <span style={{ color: '#666' }}> · Roles: {user.roles.join(', ')}</span>
+                    )}
+                </div>
+            )}
+
+            {isAuthenticated && (
+                <div style={{
+                    padding: '1rem',
+                    backgroundColor: '#f8f9fb',
+                    borderRadius: '10px',
+                    marginBottom: '1.5rem',
+                    border: '1px solid #eee',
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 style={{ margin: 0, fontSize: '1.125rem' }}>Model Spend</h2>
+                        {usageLoading && <span style={{ color: '#666', fontSize: '0.875rem' }}>Loading…</span>}
+                    </div>
+
+                    {usageError && (
+                        <p style={{ color: '#b00020', marginTop: '0.75rem' }}>{usageError}</p>
+                    )}
+
+                    {usage && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                                gap: '1rem',
+                            }}>
+                                <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px' }}>
+                                    <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>Daily spend</p>
+                                    <strong style={{ fontSize: '1.1rem' }}>
+                                        {formatCurrency(usage.budget.daily_spend)}
+                                    </strong>
+                                    <p style={{ margin: '0.25rem 0 0', color: '#666', fontSize: '0.8rem' }}>
+                                        Remaining {formatCurrency(usage.budget.daily_remaining)}
+                                    </p>
+                                </div>
+                                <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px' }}>
+                                    <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>Monthly spend</p>
+                                    <strong style={{ fontSize: '1.1rem' }}>
+                                        {formatCurrency(usage.budget.monthly_spend)}
+                                    </strong>
+                                    <p style={{ margin: '0.25rem 0 0', color: '#666', fontSize: '0.8rem' }}>
+                                        Remaining {formatCurrency(usage.budget.monthly_remaining)}
+                                    </p>
+                                </div>
+                                <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px' }}>
+                                    <p style={{ margin: 0, color: '#666', fontSize: '0.875rem' }}>Cloud access</p>
+                                    <strong style={{ fontSize: '1.1rem' }}>
+                                        {usage.budget.can_use_cloud ? 'Available' : 'Restricted'}
+                                    </strong>
+                                    <p style={{ margin: '0.25rem 0 0', color: '#666', fontSize: '0.8rem' }}>
+                                        {usage.budget.daily_warning || usage.budget.monthly_warning
+                                            ? 'Budget warning active'
+                                            : 'Within budget'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{ marginTop: '1rem' }}>
+                                <p style={{ marginBottom: '0.5rem', fontWeight: 600 }}>Spend by model</p>
+                                {Object.keys(usage.usage.by_model).length === 0 ? (
+                                    <p style={{ margin: 0, color: '#666' }}>No cloud spend recorded yet.</p>
+                                ) : (
+                                    <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
+                                        {Object.entries(usage.usage.by_model).map(([model, cost]) => (
+                                            <li key={model} style={{ marginBottom: '0.25rem' }}>
+                                                <strong>{model}</strong>: {formatCurrency(cost)}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        </div>
                     )}
                 </div>
             )}

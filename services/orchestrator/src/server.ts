@@ -8,6 +8,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { getRedisClient, closeRedisClient, createAllIndexes, checkIndexesExist } from '@mother-harness/shared';
 import { Orchestrator } from './orchestrator.js';
+import { getCostTracker } from './cost-tracker.js';
 import { config } from './config.js';
 
 // Create Fastify instance
@@ -165,6 +166,26 @@ app.get('/api/task/:id', async (request, reply) => {
 app.get('/api/projects', async (request) => {
     const { user_id } = request.query as { user_id: string };
     return await orchestrator.listProjects(user_id);
+});
+
+app.get('/api/usage', async (request, reply) => {
+    const { user_id } = request.query as { user_id: string };
+
+    if (!user_id) {
+        reply.status(400);
+        return { error: 'user_id is required' };
+    }
+
+    try {
+        const tracker = getCostTracker();
+        const budget = await tracker.getBudgetStatus(user_id);
+        const usage = await tracker.getUsageReport(user_id);
+        return { budget, usage };
+    } catch (error) {
+        app.log.error(error, 'Failed to get usage report');
+        reply.status(500);
+        return { error: 'Failed to get usage report' };
+    }
 });
 
 app.get('/api/approvals/pending', async (request) => {

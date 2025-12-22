@@ -6,6 +6,12 @@ export {
     type BudgetScope,
     type ResourceType,
     type ResourceBudget,
+    type ResourceBudgetCounters,
+    type ResourceUsageReportItem,
+    type ResourceUsageReport,
+} from '../types/resource-budget.js';
+
+export {
     ResourceBudgetGuard,
     getResourceBudgetGuard,
 } from './budget-guard.js';
@@ -24,4 +30,3 @@ export {
     AlertManager,
     getAlertManager,
 } from './alert-manager.js';
-

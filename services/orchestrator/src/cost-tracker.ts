@@ -152,10 +152,15 @@ export class CostTracker {
             return result;
         };
 
+        const removeTotal = (hash: Record<string, number>) => {
+            const { total, ...rest } = hash;
+            return rest;
+        };
+
         return {
             daily: parseHash(daily),
             monthly: parseHash(monthly),
-            by_model: parseHash(monthly),
+            by_model: removeTotal(parseHash(monthly)),
         };
     }
 

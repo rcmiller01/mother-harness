@@ -72,3 +72,13 @@ export { createSuccessResult, createErrorResult } from './result.js';
 
 // Run types
 export type { RunStatus, Run } from './run.js';
+
+// Resource budget types
+export type {
+    BudgetScope,
+    ResourceType,
+    ResourceBudgetCounters,
+    ResourceBudget,
+    ResourceUsageReportItem,
+    ResourceUsageReport,
+} from './resource-budget.js';

@@ -16,6 +16,7 @@ import {
     createTask,
     createProject,
     getRedisJSON,
+    getResourceBudgetGuard,
     TaskSchema,
     ArtifactSchema,
     ProjectSchema,
@@ -27,6 +28,7 @@ import { Tier1Memory } from './memory/tier1-recent.js';
 import { Tier2Memory } from './memory/tier2-summaries.js';
 import { Tier3Memory } from './memory/tier3-longterm.js';
 import { logActivity } from './activity-stream.js';
+import { getCostTracker } from './cost-tracker.js';
 
 /** Agent dispatch result */
 interface AgentResult {
@@ -35,6 +37,7 @@ interface AgentResult {
     explanation?: string;
     tokens_used?: number;
     duration_ms?: number;
+    model_used?: string;
 }
 
 /** Agent executor interface */
@@ -56,6 +59,8 @@ export class Orchestrator {
     private tier1 = new Tier1Memory();
     private tier2 = new Tier2Memory();
     private tier3 = new Tier3Memory();
+    private budgetGuard = getResourceBudgetGuard();
+    private costTracker = getCostTracker();
 
     /**
      * Create a run with a new task
@@ -304,6 +309,35 @@ export class Orchestrator {
             const depsMet = await this.checkDependencies(task, step);
             if (!depsMet) continue;
 
+            const invocationCheck = await this.budgetGuard.checkAllScopes(
+                runId,
+                task.user_id,
+                'agent_invocations',
+                1
+            );
+            if (!invocationCheck.allowed) {
+                const warning = invocationCheck.warning ?? 'Agent invocation budget exhausted';
+                await this.updateStepStatus(taskId, step.id, 'failed', warning);
+                await this.updateTaskStatus(taskId, 'failed');
+                await logActivity({
+                    type: 'step_failed',
+                    run_id: runId,
+                    task_id: task.id,
+                    project_id: task.project_id,
+                    user_id: task.user_id,
+                    details: { step_id: step.id, agent: step.agent, error: warning },
+                });
+                return {
+                    status: 'failed',
+                    termination_reason: 'budget_exhausted',
+                    termination_details: warning,
+                    total_tokens: totalTokens,
+                    total_duration_ms: Date.now() - startTime,
+                    last_step_id: step.id,
+                    last_agent: step.agent,
+                };
+            }
+
             // Update step status
             await this.updateStepStatus(taskId, step.id, 'in_progress');
             await logActivity({
@@ -351,6 +385,46 @@ export class Orchestrator {
                 totalTokens += result.tokens_used ?? 0;
                 lastStepId = step.id;
                 lastAgent = step.agent;
+
+                const tokensUsed = result.tokens_used ?? 0;
+                await this.budgetGuard.recordUsageAllScopes(runId, task.user_id, 'agent_invocations', 1);
+                if (tokensUsed > 0) {
+                    const tokenCheck = await this.budgetGuard.checkAllScopes(
+                        runId,
+                        task.user_id,
+                        'tokens',
+                        tokensUsed
+                    );
+                    await this.budgetGuard.recordUsageAllScopes(runId, task.user_id, 'tokens', tokensUsed);
+
+                    if (!tokenCheck.allowed) {
+                        const warning = tokenCheck.warning ?? 'Token budget exhausted';
+                        await this.updateStepStatus(taskId, step.id, 'failed', warning);
+                        await this.updateTaskStatus(taskId, 'failed');
+                        await logActivity({
+                            type: 'step_failed',
+                            run_id: runId,
+                            task_id: task.id,
+                            project_id: task.project_id,
+                            user_id: task.user_id,
+                            details: { step_id: step.id, agent: step.agent, error: warning },
+                        });
+                        return {
+                            status: 'failed',
+                            termination_reason: 'budget_exhausted',
+                            termination_details: warning,
+                            total_tokens: totalTokens,
+                            total_duration_ms: Date.now() - startTime,
+                            last_step_id: step.id,
+                            last_agent: step.agent,
+                        };
+                    }
+                }
+
+                const modelUsed = this.getModelUsed(result);
+                if (modelUsed && tokensUsed > 0) {
+                    await this.costTracker.trackUsage(task.user_id, modelUsed, tokensUsed);
+                }
 
                 // Add assistant response to tier 1 memory
                 if (result.explanation) {
@@ -453,6 +527,16 @@ export class Orchestrator {
         result.duration_ms = Date.now() - startTime;
 
         return result;
+    }
+
+    private getModelUsed(result: AgentResult): string | undefined {
+        if (result.model_used) return result.model_used;
+        const outputs = result.outputs as Record<string, unknown> | undefined;
+        const modelFromOutputs = outputs?.['model_used'];
+        if (typeof modelFromOutputs === 'string') {
+            return modelFromOutputs;
+        }
+        return undefined;
     }
 
     /**

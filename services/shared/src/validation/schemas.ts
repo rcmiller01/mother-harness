@@ -337,3 +337,45 @@ export const ResultEnvelopeSchema = z.object({
     }).optional(),
     timestamp: z.string().datetime(),
 });
+
+// ============ Resource Budget Schemas ============
+
+export const BudgetScopeSchema = z.enum(['run', 'user', 'global']);
+
+export const ResourceTypeSchema = z.enum([
+    'tokens',
+    'api_calls',
+    'tool_executions',
+    'agent_invocations',
+    'embeddings',
+    'storage_bytes',
+    'cost',
+]);
+
+export const ResourceBudgetCountersSchema = z.object({
+    tokens: z.number(),
+    api_calls: z.number(),
+    tool_executions: z.number(),
+    agent_invocations: z.number(),
+    embeddings: z.number(),
+    storage_bytes: z.number(),
+    cost: z.number(),
+});
+
+export const ResourceBudgetSchema = z.object({
+    scope: BudgetScopeSchema,
+    scope_id: z.string(),
+    limits: ResourceBudgetCountersSchema,
+    used: ResourceBudgetCountersSchema,
+    warnings_sent: z.array(ResourceTypeSchema),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
+
+export const ResourceUsageReportItemSchema = z.object({
+    used: z.number(),
+    limit: z.number(),
+    percent: z.number(),
+});
+
+export const ResourceUsageReportSchema = z.record(ResourceTypeSchema, ResourceUsageReportItemSchema);
