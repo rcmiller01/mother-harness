@@ -16,12 +16,16 @@ Mother-Harness is a three-tiered agent orchestration system designed for complex
 
 ```
 mother-harness/
-├── docker-compose.yml          # All services configuration
+├── .claude/                     # Claude configuration
+├── .github/                     # GitHub workflows
+├── docker-compose.yml           # All services configuration
 ├── env.example                  # Environment template
 ├── package.json                 # Root workspace config
 ├── pnpm-workspace.yaml          # pnpm workspaces
 ├── tsconfig.json                # Base TypeScript config
+├── vitest.config.ts             # Vitest configuration
 │
+├── docs/                        # Documentation
 ├── services/
 │   ├── shared/                  # Shared types & utilities
 │   │   └── src/
@@ -36,13 +40,11 @@ mother-harness/
 │   │       ├── planner.ts       # Task planning
 │   │       └── memory/          # Tiered memory system
 │   │
-│   ├── docling/                 # Document ingestion (TODO)
-│   ├── agents/                  # Agent workers (TODO)
-│   └── dashboard/               # Next.js UI (TODO)
+│   ├── docling/                 # Document ingestion
+│   ├── agents/                  # Agent workers
+│   └── dashboard/               # Next.js UI
 │
-├── n8n-workflows/               # n8n workflow templates (TODO)
-├── scripts/                     # Deployment scripts (TODO)
-├── docs/                        # Documentation (TODO)
+├── n8n-workflows/               # n8n workflow templates
 └── project documents/           # Design PDFs
 ```
 
