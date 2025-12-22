@@ -172,10 +172,10 @@ export class Orchestrator {
         const task = createTask(taskId, actualProjectId, userId, query);
 
         // Add user message to tier 1 memory
-        await this.tier1.addMessage(taskId, 'user', query);
+        await this.tier1.addUserMessage(actualProjectId, query);
 
         // Get context from memory for planning
-        const recentContext = await this.tier1.getContextString(taskId);
+        const recentContext = await this.tier1.getContextString(actualProjectId);
         const summaryContext = await this.tier2.getContextString(actualProjectId, 3);
         const longTermContext = await this.tier3.getContextString(actualProjectId, query);
 
@@ -359,7 +359,7 @@ export class Orchestrator {
 
                 // Add assistant response to tier 1 memory
                 if (result.explanation) {
-                    await this.tier1.addMessage(taskId, 'assistant', result.explanation);
+                    await this.tier1.addAssistantMessage(task.project_id, result.explanation, step.agent);
                 }
 
                 // Update step with result
@@ -463,7 +463,7 @@ export class Orchestrator {
         }
 
         // Build context for agent
-        const recentContext = await this.tier1.getContextString(task.id);
+        const recentContext = await this.tier1.getContextString(task.project_id);
         const longTermContext = await this.tier3.getContextString(task.project_id, step.description);
 
         const context = {
@@ -839,7 +839,7 @@ export class Orchestrator {
         longTerm: string;
     }> {
         return {
-            recent: await this.tier1.getContextString(taskId),
+            recent: await this.tier1.getContextString(projectId),
             summaries: await this.tier2.getContextString(projectId),
             longTerm: await this.tier3.getContextString(projectId, query),
         };
