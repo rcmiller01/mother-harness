@@ -30,6 +30,7 @@
 Before deploying, ensure `.env` file contains:
 - `REDIS_PASSWORD` - Redis authentication password
 - `REDIS_USERNAME` - Redis ACL user (for example: orchestrator)
+- `JWT_SECRET` - Secret for signing auth tokens (must be rotated)
 - `GOOGLE_CLIENT_ID` - Google OAuth client ID for sign-in
 - `GOOGLE_ALLOWED_DOMAINS` - Comma-separated allowed domains (optional)
 - `GOOGLE_ADMIN_EMAILS` - Comma-separated admin emails (optional)
@@ -55,6 +56,10 @@ Before deploying, ensure `.env` file contains:
 - Orchestrator: `GET http://localhost:8000/health`
 - Redis: Health check configured in docker-compose
 - Dashboard: Available on port 3000
+
+### Secret Verification
+- Confirm all secret placeholders (e.g., `CHANGE_ME`) are replaced in `.env`.
+- Verify secrets are unique per environment and rotated before deployment.
 
 ## 🚀 Deployment Steps
 

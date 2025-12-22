@@ -34,6 +34,55 @@ const app = Fastify({
 let orchestrator: Orchestrator;
 let metricsConsumer: ReturnType<typeof startActivityMetricsConsumer> | null = null;
 
+const INVALID_SECRET_VALUES = new Set([
+    '',
+    'CHANGE_ME',
+    'CHANGEME',
+    'change_me',
+    'changeme',
+    'default',
+    'password',
+    'development-secret-change-in-production',
+]);
+
+function isInvalidSecret(value: string | undefined): boolean {
+    if (!value) {
+        return true;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return true;
+    }
+
+    return INVALID_SECRET_VALUES.has(trimmed);
+}
+
+function validateSecrets() {
+    const requiredSecrets = [
+        'JWT_SECRET',
+        'REDIS_PASSWORD',
+        'REDIS_ACL_ORCHESTRATOR_PASSWORD',
+        'REDIS_ACL_DOCLING_PASSWORD',
+        'REDIS_ACL_AGENTS_PASSWORD',
+        'REDIS_ACL_DASHBOARD_PASSWORD',
+        'N8N_PASSWORD',
+    ];
+
+    const invalidSecrets = requiredSecrets.filter((key) => isInvalidSecret(process.env[key]));
+
+    const redisUrl = process.env['REDIS_URL'] ?? '';
+    if (/CHANGE_ME|CHANGEME|changeme|change_me/.test(redisUrl)) {
+        invalidSecrets.push('REDIS_URL');
+    }
+
+    if (invalidSecrets.length > 0) {
+        throw new Error(
+            `Refusing to start with default or empty secrets: ${invalidSecrets.join(', ')}`
+        );
+    }
+}
+
 // Register plugins
 async function registerPlugins() {
     await app.register(cors, {
@@ -386,6 +435,7 @@ async function initializeRedis() {
 // Start server
 async function start() {
     try {
+        validateSecrets();
         await registerPlugins();
         await initializeRedis();
 
