@@ -12,7 +12,10 @@ export interface PlanningContext {
     recent_context?: string;
 }
 
-/** Keywords that suggest specific agent types */
+/**
+ * Keywords that suggest specific agent types.
+ * Note: skeptic = critique/stress-test; critic = QA/review gate.
+ */
 const AGENT_KEYWORDS: Record<AgentType, string[]> = {
     orchestrator: [],
     researcher: ['research', 'find', 'search', 'look up', 'investigate', 'explore', 'learn about'],

@@ -47,8 +47,8 @@ export const DEFAULT_AGENT_CONTRACTS: Record<AgentType, AgentContract> = {
     },
     critic: {
         agent: 'critic',
-        action_allowlist: ['code_execution', 'rag_retrieval'],
-        default_action: 'code_execution',
+        action_allowlist: ['rag_retrieval'],
+        default_action: 'rag_retrieval',
         required_artifacts: [],
     },
     skeptic: {

@@ -1,5 +1,8 @@
 # Roadmap
 
+## Launch Readiness
+- Reference checklist: [Launch Readiness Checklist](launch-readiness.md)
+
 ## Prioritized Roadmap
 1. **Stabilize core orchestration**
    - Harden task lifecycle handling in the orchestrator.

@@ -116,6 +116,14 @@ export function registerAgentExecutor(agentType: AgentType, executor: AgentExecu
     agentExecutors.set(agentType, executor);
 }
 
+export function clearAgentExecutors(): void {
+    agentExecutors.clear();
+}
+
+export function hasAgentExecutor(agentType: AgentType): boolean {
+    return agentExecutors.has(agentType);
+}
+
 export class Orchestrator {
     private redis = getRedisJSON();
     private planner = new TaskPlanner();
@@ -638,9 +646,7 @@ export class Orchestrator {
             throw new Error(allowlistValidation.errors.join('; '));
         }
 
-        const executor = agentExecutors.get(step.agent) ?? getLocalAgentExecutor(step.agent);
-
-        // Build context for agent and workflows
+        // Build context for agent
         const recentContext = await this.tier1.getContextString(task.project_id);
         const longTermContext = await this.tier3.getContextString(task.project_id, step.description);
 

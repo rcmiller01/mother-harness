@@ -79,12 +79,21 @@ export class SkepticAgent extends BaseAgent {
 
         const criticalCount = critique.concerns.filter(c => c.level === 'critical').length;
         const significantCount = critique.concerns.filter(c => c.level === 'significant').length;
+        const challenges = critique.concerns.reduce<Record<string, Concern[]>>((grouped, concern) => {
+            const area = concern.area || 'general';
+            if (!grouped[area]) {
+                grouped[area] = [];
+            }
+            grouped[area]!.push(concern);
+            return grouped;
+        }, {});
 
         return {
             success: true,
             outputs: {
                 assessment: critique.overall_assessment,
                 concerns: critique.concerns,
+                challenges,
                 blind_spots: critique.blind_spots,
                 edge_cases: critique.edge_cases,
                 alternatives: critique.alternatives,

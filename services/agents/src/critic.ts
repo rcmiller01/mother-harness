@@ -86,19 +86,31 @@ export class CriticAgent extends BaseAgent {
 
         const criticalCount = reviewResult.issues.filter(i => i.severity === 'critical').length;
         const highCount = reviewResult.issues.filter(i => i.severity === 'high').length;
+        const totalCount = reviewResult.issues.length;
 
         return {
             success: true,
             outputs: {
+                review_report: {
+                    approval: reviewResult.approval,
+                    summary: reviewResult.summary,
+                    positives: reviewResult.positive_notes,
+                    counts: {
+                        critical: criticalCount,
+                        high: highCount,
+                        total: totalCount,
+                    },
+                },
+                issues_found: reviewResult.issues,
                 approval: reviewResult.approval,
                 summary: reviewResult.summary,
                 issues: reviewResult.issues,
                 positive_notes: reviewResult.positive_notes,
                 critical_issues: criticalCount,
                 high_issues: highCount,
-                total_issues: reviewResult.issues.length,
+                total_issues: totalCount,
             },
-            explanation: `Review ${reviewResult.approval}: ${criticalCount} critical, ${highCount} high, ${reviewResult.issues.length} total issues`,
+            explanation: `Review ${reviewResult.approval}: ${criticalCount} critical, ${highCount} high, ${totalCount} total issues`,
             tokens_used: reviewResult.tokens,
             duration_ms: Date.now() - startTime,
         };
