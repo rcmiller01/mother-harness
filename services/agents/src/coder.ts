@@ -219,8 +219,8 @@ export class CoderAgent extends BaseAgent {
         } catch (error) {
             // Fallback if tool executor not available
             return {
-                passed: true,
-                output: `Test placeholder for ${testableFiles.length} file(s). ToolExecutor not available.`,
+                passed: false,
+                output: `Test execution failed for ${testableFiles.length} file(s). ToolExecutor not available.`,
             };
         }
     }
