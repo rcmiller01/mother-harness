@@ -4,6 +4,7 @@
  */
 
 import type { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
+import { OAuth2Client } from 'google-auth-library';
 import { getRedisClient } from '@mother-harness/shared';
 
 /** JWT payload structure */
@@ -46,6 +47,10 @@ export interface APIKey {
 export async function registerAuth(app: FastifyInstance): Promise<void> {
     const redis = getRedisClient();
     const jwtSecret = process.env['JWT_SECRET'] ?? 'development-secret-change-in-production';
+    const googleClientId = process.env['GOOGLE_CLIENT_ID'];
+    const allowedDomains = parseCsvEnv(process.env['GOOGLE_ALLOWED_DOMAINS']);
+    const adminEmails = parseCsvEnv(process.env['GOOGLE_ADMIN_EMAILS']);
+    const approverEmails = parseCsvEnv(process.env['GOOGLE_APPROVER_EMAILS']);
 
     // Decorate request with user
     app.decorateRequest('user', null);
@@ -62,7 +67,13 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
         const authHeader = request.headers.authorization;
         if (authHeader?.startsWith('Bearer ')) {
             const token = authHeader.slice(7);
-            const user = await validateJWT(token, jwtSecret);
+            const user = googleClientId
+                ? await validateGoogleToken(token, googleClientId, {
+                    allowedDomains,
+                    adminEmails,
+                    approverEmails,
+                })
+                : await validateJWT(token, jwtSecret);
             if (user) {
                 (request as any).user = user;
                 return;
@@ -82,13 +93,67 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
             }
         }
 
-        // No valid auth - for now, allow anonymous with limited access
-        // In production, this should return 401
-        (request as any).user = {
-            user_id: 'anonymous',
-            roles: ['read'],
-        };
+        reply.status(401).send({ error: 'Authentication required' });
     });
+}
+
+function parseCsvEnv(value?: string): string[] {
+    if (!value) return [];
+    return value.split(',').map(entry => entry.trim()).filter(Boolean);
+}
+
+/**
+ * Validate Google ID token
+ */
+async function validateGoogleToken(
+    token: string,
+    clientId: string,
+    options: {
+        allowedDomains: string[];
+        adminEmails: string[];
+        approverEmails: string[];
+    }
+): Promise<UserSession | null> {
+    try {
+        const client = new OAuth2Client(clientId);
+        const ticket = await client.verifyIdToken({
+            idToken: token,
+            audience: clientId,
+        });
+        const payload = ticket.getPayload();
+        if (!payload || !payload.sub) {
+            return null;
+        }
+
+        if (!payload.email || !payload.email_verified) {
+            return null;
+        }
+
+        const domain = payload.hd ?? payload.email.split('@')[1];
+        if (options.allowedDomains.length > 0 && !options.allowedDomains.includes(domain)) {
+            return null;
+        }
+
+        const roles = ['user'];
+        if (options.approverEmails.includes(payload.email)) {
+            roles.push('approver');
+        }
+        if (options.adminEmails.includes(payload.email)) {
+            roles.push('admin', 'approver');
+        }
+
+        return {
+            user_id: payload.sub,
+            email: payload.email,
+            name: payload.name,
+            roles: Array.from(new Set(roles)),
+            created_at: new Date((payload.iat ?? 0) * 1000).toISOString(),
+            last_activity: new Date().toISOString(),
+        };
+    } catch (error) {
+        console.error('[Auth] Google token validation error:', error);
+        return null;
+    }
 }
 
 /**
