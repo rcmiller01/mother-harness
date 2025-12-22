@@ -16,6 +16,7 @@ import {
     resolveLibraryAccess,
 } from '@mother-harness/shared';
 import { Orchestrator } from './orchestrator.js';
+import { getCostTracker } from './cost-tracker.js';
 import { config } from './config.js';
 import { registerAuth, requireRole, type UserSession } from './auth.js';
 

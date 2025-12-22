@@ -46,4 +46,12 @@ export {
     RunStatusSchema,
     RunSchema,
     ResultEnvelopeSchema,
+
+    // Resource budget schemas
+    BudgetScopeSchema,
+    ResourceTypeSchema,
+    ResourceBudgetCountersSchema,
+    ResourceBudgetSchema,
+    ResourceUsageReportItemSchema,
+    ResourceUsageReportSchema,
 } from './schemas.js';
