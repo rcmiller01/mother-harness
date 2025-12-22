@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import {
     type Task,
     type Project,
+    type Library,
     type Approval,
     type TodoItem,
     type AgentType,
@@ -15,12 +16,14 @@ import {
     type TerminationRecord,
     createTask,
     createProject,
+    createLibrary,
     getRedisJSON,
     TaskSchema,
     ArtifactSchema,
     ProjectSchema,
     ApprovalSchema,
     RunSchema,
+    LibrarySchema,
 } from '@mother-harness/shared';
 import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
@@ -123,6 +126,78 @@ export class Orchestrator {
         }
 
         return runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    }
+
+    /**
+     * List document libraries
+     */
+    async listLibraries(search?: string): Promise<Library[]> {
+        const keys = await this.redis.keys('library:*');
+        const libraries: Library[] = [];
+        const query = search?.trim().toLowerCase();
+
+        for (const key of keys) {
+            const library = await this.redis.get(key) as Library | null;
+            if (!library) continue;
+            const result = LibrarySchema.safeParse(library);
+            if (!result.success) {
+                console.error('Invalid library data:', result.error);
+                continue;
+            }
+
+            if (query) {
+                const haystack = [
+                    result.data.name,
+                    result.data.id,
+                    result.data.folder_path,
+                    result.data.description ?? '',
+                ].join(' ').toLowerCase();
+                if (!haystack.includes(query)) continue;
+            }
+
+            libraries.push(result.data);
+        }
+
+        return libraries.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * Create a new document library
+     */
+    async createLibrary(
+        name: string,
+        folderPath: string,
+        description?: string,
+        autoScan: boolean = true
+    ): Promise<Library> {
+        const libraryId = `lib-${nanoid(10)}`;
+        const library = createLibrary(libraryId, name, folderPath, autoScan);
+        if (description) {
+            library.description = description;
+        }
+
+        await this.redis.set(`library:${libraryId}`, '$', library);
+        return library;
+    }
+
+    /**
+     * Trigger a rescan for a library
+     */
+    async rescanLibrary(libraryId: string): Promise<Library | null> {
+        const library = await this.redis.get(`library:${libraryId}`) as Library | null;
+        if (!library) return null;
+
+        const now = new Date().toISOString();
+        const updated = {
+            ...library,
+            scan_status: 'scanning' as const,
+            last_scanned: now,
+            updated_at: now,
+            processed_count: 0,
+        };
+
+        await this.redis.set(`library:${libraryId}`, '$', updated);
+        return updated;
     }
 
     /**
