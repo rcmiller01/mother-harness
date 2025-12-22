@@ -31,6 +31,7 @@ const app = Fastify({
 
 // Orchestrator instance
 let orchestrator: Orchestrator;
+let metricsConsumer: ReturnType<typeof startActivityMetricsConsumer> | null = null;
 
 // Register plugins
 async function registerPlugins() {
@@ -336,6 +337,7 @@ async function start() {
 
         // Initialize orchestrator
         orchestrator = new Orchestrator();
+        metricsConsumer = startActivityMetricsConsumer();
 
         await app.listen({
             port: config.port,
@@ -352,6 +354,9 @@ async function start() {
 // Graceful shutdown
 async function shutdown() {
     app.log.info('Shutting down...');
+    if (metricsConsumer) {
+        await metricsConsumer.stop();
+    }
     await app.close();
     await closeRedisClient();
     process.exit(0);
