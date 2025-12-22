@@ -43,5 +43,7 @@ export {
     // Result schemas
     TerminationReasonSchema,
     TerminationRecordSchema,
+    RunStatusSchema,
+    RunSchema,
     ResultEnvelopeSchema,
 } from './schemas.js';

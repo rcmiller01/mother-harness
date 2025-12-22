@@ -10,23 +10,31 @@ import {
     type Approval,
     type TodoItem,
     type AgentType,
+    type Run,
+    type TerminationReason,
+    type TerminationRecord,
     createTask,
     createProject,
     getRedisJSON,
+    getContractEnforcer,
+    getRoleRegistry,
     TaskSchema,
+    ArtifactSchema,
     ProjectSchema,
     ApprovalSchema,
+    RunSchema,
 } from '@mother-harness/shared';
 import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
 import { Tier2Memory } from './memory/tier2-summaries.js';
 import { Tier3Memory } from './memory/tier3-longterm.js';
-import { getN8nAdapter, type WorkflowResult } from './n8n-adapter.js';
+import { logActivity } from './activity-stream.js';
 
 /** Agent dispatch result */
 interface AgentResult {
     success: boolean;
     outputs: Record<string, unknown>;
+    artifacts?: string[];
     explanation?: string;
     tokens_used?: number;
     duration_ms?: number;
@@ -51,7 +59,101 @@ export class Orchestrator {
     private tier1 = new Tier1Memory();
     private tier2 = new Tier2Memory();
     private tier3 = new Tier3Memory();
-    private n8nAdapter = getN8nAdapter();
+    private enforcer = getContractEnforcer();
+    private registry = getRoleRegistry();
+
+    /**
+     * Create a run with a new task
+     */
+    async createRun(
+        userId: string,
+        query: string,
+        projectId?: string
+    ): Promise<{ run: Run; task: Task }> {
+        const task = await this.createTask(userId, query, projectId);
+        const runId = `run-${nanoid()}`;
+        const now = new Date().toISOString();
+
+        const run: Run = {
+            id: runId,
+            task_id: task.id,
+            project_id: task.project_id,
+            user_id: task.user_id,
+            status: 'created',
+            created_at: now,
+            updated_at: now,
+        };
+
+        await this.redis.set(`run:${runId}`, '$', run);
+        await logActivity({
+            type: 'run_created',
+            run_id: runId,
+            task_id: task.id,
+            project_id: task.project_id,
+            user_id: task.user_id,
+            details: { query },
+        });
+
+        return { run, task };
+    }
+
+    /**
+     * Get run by ID
+     */
+    async getRun(runId: string): Promise<Run | null> {
+        const run = await this.redis.get(`run:${runId}`) as Run | null;
+        if (!run) return null;
+        const result = RunSchema.safeParse(run);
+        if (!result.success) {
+            console.error('Invalid run data:', result.error);
+            return null;
+        }
+        return result.data;
+    }
+
+    /**
+     * List runs for a user
+     */
+    async listRuns(userId: string): Promise<Run[]> {
+        const keys = await this.redis.keys('run:*');
+        const runs: Run[] = [];
+
+        for (const key of keys) {
+            const run = await this.redis.get(key) as Run | null;
+            if (run?.user_id !== userId) continue;
+            const result = RunSchema.safeParse(run);
+            if (result.success) {
+                runs.push(result.data);
+            }
+        }
+
+        return runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    }
+
+    /**
+     * Get artifacts for a run
+     */
+    async getRunArtifacts(runId: string): Promise<Task['artifacts'] | null> {
+        const run = await this.getRun(runId);
+        if (!run) return null;
+        const task = await this.getTask(run.task_id);
+        if (!task) return null;
+        return task.artifacts;
+    }
+
+    /**
+     * Get a specific artifact by ID
+     */
+    async getArtifact(artifactId: string): Promise<Task['artifacts'][number] | null> {
+        const artifact = await this.redis.get(`artifact:${artifactId}`) as Task['artifacts'][number] | null;
+        if (!artifact) return null;
+        const result = ArtifactSchema.safeParse(artifact);
+        if (!result.success) {
+            console.error('Invalid artifact data:', result.error);
+            return null;
+        }
+        return result.data;
+    }
 
     /**
      * Create a new task from user query
@@ -70,10 +172,10 @@ export class Orchestrator {
         const task = createTask(taskId, actualProjectId, userId, query);
 
         // Add user message to tier 1 memory
-        await this.tier1.addMessage(taskId, 'user', query);
+        await this.tier1.addUserMessage(actualProjectId, query);
 
         // Get context from memory for planning
-        const recentContext = await this.tier1.getContextString(taskId);
+        const recentContext = await this.tier1.getContextString(actualProjectId);
         const summaryContext = await this.tier2.getContextString(actualProjectId, 3);
         const longTermContext = await this.tier3.getContextString(actualProjectId, query);
 
@@ -115,9 +217,80 @@ export class Orchestrator {
     }
 
     /**
+     * Execute a run
+     */
+    async executeRun(runId: string): Promise<void> {
+        const run = await this.getRun(runId);
+        if (!run) throw new Error(`Run not found: ${runId}`);
+
+        const task = await this.getTask(run.task_id);
+        if (!task) throw new Error(`Task not found: ${run.task_id}`);
+
+        const startedAt = run.started_at ?? new Date().toISOString();
+        await this.updateRunStatus(runId, 'executing', { started_at: startedAt });
+        await logActivity({
+            type: 'run_started',
+            run_id: runId,
+            task_id: task.id,
+            project_id: task.project_id,
+            user_id: task.user_id,
+        });
+
+        const startTime = Date.now();
+        let outcome: Awaited<ReturnType<Orchestrator['executeTask']>>;
+
+        try {
+            outcome = await this.executeTask(task.id, runId);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            await this.terminateRun(runId, {
+                reason: 'agent_error',
+                details: errorMessage,
+                total_tokens: 0,
+                total_duration_ms: Date.now() - startTime,
+            });
+            return;
+        }
+
+        if (outcome.status === 'approval_needed') {
+            await this.updateRunStatus(runId, 'waiting_approval');
+            await logActivity({
+                type: 'run_waiting_approval',
+                run_id: runId,
+                task_id: task.id,
+                project_id: task.project_id,
+                user_id: task.user_id,
+                details: { step_id: outcome.last_step_id },
+            });
+            return;
+        }
+
+        const totalDuration = outcome.total_duration_ms ?? (Date.now() - startTime);
+        await this.terminateRun(runId, {
+            reason: outcome.termination_reason,
+            details: outcome.termination_details,
+            total_tokens: outcome.total_tokens,
+            total_duration_ms: totalDuration,
+            last_step_id: outcome.last_step_id,
+            last_agent: outcome.last_agent,
+        });
+    }
+
+    /**
      * Execute a task
      */
-    async executeTask(taskId: string): Promise<void> {
+    private async executeTask(
+        taskId: string,
+        runId: string
+    ): Promise<{
+        status: 'completed' | 'failed' | 'approval_needed';
+        termination_reason: TerminationReason;
+        termination_details: string;
+        total_tokens: number;
+        total_duration_ms: number;
+        last_step_id?: string;
+        last_agent?: AgentType;
+    }> {
         const task = await this.getTask(taskId);
         if (!task) throw new Error(`Task not found: ${taskId}`);
 
@@ -126,6 +299,9 @@ export class Orchestrator {
 
         const agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number }> = [];
         let totalTokens = 0;
+        const startTime = Date.now();
+        let lastStepId: string | undefined;
+        let lastAgent: AgentType | undefined;
 
         // Execute steps in order
         for (const step of task.todo_list) {
@@ -135,13 +311,37 @@ export class Orchestrator {
 
             // Update step status
             await this.updateStepStatus(taskId, step.id, 'in_progress');
+            await logActivity({
+                type: 'step_started',
+                run_id: runId,
+                task_id: task.id,
+                project_id: task.project_id,
+                user_id: task.user_id,
+                details: { step_id: step.id, agent: step.agent },
+            });
 
             try {
                 // Check if approval is required
                 if (step.require_approval) {
-                    await this.createApprovalRequest(task, step);
+                    await this.createApprovalRequest(task, step, runId);
                     await this.updateTaskStatus(taskId, 'approval_needed');
-                    return;
+                    await logActivity({
+                        type: 'approval_requested',
+                        run_id: runId,
+                        task_id: task.id,
+                        project_id: task.project_id,
+                        user_id: task.user_id,
+                        details: { step_id: step.id, agent: step.agent },
+                    });
+                    return {
+                        status: 'approval_needed',
+                        termination_reason: 'approval_timeout',
+                        termination_details: 'Awaiting approval',
+                        total_tokens: totalTokens,
+                        total_duration_ms: Date.now() - startTime,
+                        last_step_id: step.id,
+                        last_agent: step.agent,
+                    };
                 }
 
                 // Execute the step
@@ -154,21 +354,47 @@ export class Orchestrator {
                     tokens: result.tokens_used ?? 0,
                 });
                 totalTokens += result.tokens_used ?? 0;
+                lastStepId = step.id;
+                lastAgent = step.agent;
 
                 // Add assistant response to tier 1 memory
                 if (result.explanation) {
-                    await this.tier1.addMessage(taskId, 'assistant', result.explanation);
+                    await this.tier1.addAssistantMessage(task.project_id, result.explanation, step.agent);
                 }
 
                 // Update step with result
                 await this.updateStepResult(taskId, step.id, result);
                 await this.updateStepStatus(taskId, step.id, 'completed');
+                await logActivity({
+                    type: 'step_completed',
+                    run_id: runId,
+                    task_id: task.id,
+                    project_id: task.project_id,
+                    user_id: task.user_id,
+                    details: { step_id: step.id, agent: step.agent },
+                });
 
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : 'Unknown error';
                 await this.updateStepStatus(taskId, step.id, 'failed', errorMessage);
                 await this.updateTaskStatus(taskId, 'failed');
-                return;
+                await logActivity({
+                    type: 'step_failed',
+                    run_id: runId,
+                    task_id: task.id,
+                    project_id: task.project_id,
+                    user_id: task.user_id,
+                    details: { step_id: step.id, agent: step.agent, error: errorMessage },
+                });
+                return {
+                    status: 'failed',
+                    termination_reason: 'agent_error',
+                    termination_details: errorMessage,
+                    total_tokens: totalTokens,
+                    total_duration_ms: Date.now() - startTime,
+                    last_step_id: step.id,
+                    last_agent: step.agent,
+                };
             }
         }
 
@@ -177,6 +403,16 @@ export class Orchestrator {
 
         // All steps completed - finalize with memory updates
         await this.finalizeTask(taskId, agentsInvoked);
+
+        return {
+            status: 'completed',
+            termination_reason: 'completed',
+            termination_details: 'Task completed successfully',
+            total_tokens: totalTokens,
+            total_duration_ms: Date.now() - startTime,
+            last_step_id: lastStepId,
+            last_agent: lastAgent,
+        };
     }
 
     /**
@@ -184,9 +420,50 @@ export class Orchestrator {
      */
     private async executeStep(task: Task, step: TodoItem): Promise<AgentResult> {
         const executor = agentExecutors.get(step.agent);
+        const contract = await this.registry.getContract(step.agent);
+
+        if (!contract) {
+            throw new Error(`Contract not found for agent: ${step.agent}`);
+        }
+
+        const allowlistValidation = await this.enforcer.validateAllowlist(
+            step.agent,
+            contract.default_action
+        );
+
+        if (!allowlistValidation.valid) {
+            throw new Error(allowlistValidation.errors.join('; '));
+        }
+
+        if (!executor) {
+            console.warn(`No executor registered for agent: ${step.agent}`);
+            const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
+                step.agent,
+                []
+            );
+
+            if (!requiredArtifactsValidation.valid) {
+                throw new Error(requiredArtifactsValidation.errors.join('; '));
+            }
+
+            // Return placeholder result
+            return {
+                success: true,
+                outputs: {
+                    agent: step.agent,
+                    description: step.description,
+                    executed_at: new Date().toISOString(),
+                    note: 'No agent executor registered - using placeholder',
+                },
+                artifacts: [],
+                explanation: `Executed step: ${step.description}`,
+                tokens_used: 0,
+                duration_ms: 0,
+            };
+        }
 
         // Build context for agent
-        const recentContext = await this.tier1.getContextString(task.id);
+        const recentContext = await this.tier1.getContextString(task.project_id);
         const longTermContext = await this.tier3.getContextString(task.project_id, step.description);
 
         const context = {
@@ -233,6 +510,15 @@ export class Orchestrator {
             ...(result.outputs ?? {}),
             workflow_error: workflowResult.error,
         };
+
+        const requiredArtifactsValidation = await this.enforcer.validateRequiredArtifacts(
+            step.agent,
+            result.artifacts ?? []
+        );
+
+        if (!requiredArtifactsValidation.valid) {
+            throw new Error(requiredArtifactsValidation.errors.join('; '));
+        }
 
         return result;
     }
@@ -418,9 +704,10 @@ export class Orchestrator {
     /**
      * Create approval request for a step
      */
-    private async createApprovalRequest(task: Task, step: TodoItem): Promise<Approval> {
+    private async createApprovalRequest(task: Task, step: TodoItem, runId: string): Promise<Approval> {
         const approval: Approval = {
             id: `approval-${nanoid()}`,
+            run_id: runId,
             task_id: task.id,
             project_id: task.project_id,
             step_id: step.id,
@@ -434,7 +721,107 @@ export class Orchestrator {
         };
 
         await this.redis.set(`approval:${approval.id}`, '$', approval);
+        await logAuditEvent({
+            type: 'approval_requested',
+            action: approval.type,
+            actor: {
+                user_id: task.user_id,
+                roles: ['user'],
+            },
+            resource: {
+                type: 'approval',
+                id: approval.id,
+                attributes: {
+                    task_id: task.id,
+                    step_id: step.id,
+                },
+            },
+            metadata: {
+                description: step.description,
+                risk_level: approval.risk_level,
+            },
+            status: 'pending',
+        });
         return approval;
+    }
+
+    /**
+     * Update run status
+     */
+    private async updateRunStatus(
+        runId: string,
+        status: Run['status'],
+        updates: Partial<Pick<Run, 'started_at' | 'terminated_at' | 'termination_reason' | 'termination_details' | 'total_tokens' | 'total_duration_ms'>> = {}
+    ): Promise<void> {
+        const now = new Date().toISOString();
+        await this.redis.set(`run:${runId}`, '$.status', status);
+        await this.redis.set(`run:${runId}`, '$.updated_at', now);
+
+        const entries = Object.entries(updates);
+        for (const [key, value] of entries) {
+            if (value === undefined) continue;
+            await this.redis.set(`run:${runId}`, `$.${key}`, value);
+        }
+    }
+
+    /**
+     * Terminate run with record
+     */
+    private async terminateRun(
+        runId: string,
+        payload: {
+            reason: TerminationReason;
+            details: string;
+            total_tokens: number;
+            total_duration_ms: number;
+            last_step_id?: string;
+            last_agent?: AgentType;
+        }
+    ): Promise<void> {
+        const run = await this.getRun(runId);
+        if (!run) throw new Error(`Run not found: ${runId}`);
+
+        const task = await this.getTask(run.task_id);
+        if (!task) throw new Error(`Task not found: ${run.task_id}`);
+
+        const terminatedAt = new Date().toISOString();
+        const termination: TerminationRecord = {
+            run_id: runId,
+            task_id: run.task_id,
+            project_id: run.project_id,
+            user_id: run.user_id,
+            reason: payload.reason,
+            details: payload.details,
+            last_step_id: payload.last_step_id,
+            last_agent: payload.last_agent,
+            total_steps_planned: task.todo_list.length,
+            steps_completed: task.steps_completed.length,
+            total_tokens: payload.total_tokens,
+            total_duration_ms: payload.total_duration_ms,
+            started_at: run.started_at ?? run.created_at,
+            terminated_at: terminatedAt,
+        };
+
+        await this.redis.set(`termination:${runId}`, '$', termination);
+        await this.updateRunStatus(runId, 'terminated', {
+            terminated_at: terminatedAt,
+            termination_reason: payload.reason,
+            termination_details: payload.details,
+            total_tokens: payload.total_tokens,
+            total_duration_ms: payload.total_duration_ms,
+        });
+        await logActivity({
+            type: 'run_terminated',
+            run_id: runId,
+            task_id: run.task_id,
+            project_id: run.project_id,
+            user_id: run.user_id,
+            details: {
+                reason: payload.reason,
+                details: payload.details,
+                steps_completed: task.steps_completed.length,
+            },
+        });
     }
 
     /**
@@ -492,11 +879,34 @@ export class Orchestrator {
 
         // Resume task execution if approved
         if (approved) {
+            await logActivity({
+                type: 'approval_approved',
+                run_id: approval.run_id,
+                task_id: approval.task_id,
+                project_id: approval.project_id,
+                user_id: approval.user_id,
+                details: { step_id: approval.step_id },
+            });
             await this.updateStepStatus(approval.task_id, approval.step_id, 'completed');
             // Continue task execution in background
-            this.executeTask(approval.task_id).catch(console.error);
+            this.executeRun(approval.run_id).catch(console.error);
         } else {
             await this.updateTaskStatus(approval.task_id, 'failed');
+            await logActivity({
+                type: 'approval_rejected',
+                run_id: approval.run_id,
+                task_id: approval.task_id,
+                project_id: approval.project_id,
+                user_id: approval.user_id,
+                details: { step_id: approval.step_id, notes },
+            });
+            await this.terminateRun(approval.run_id, {
+                reason: 'approval_rejected',
+                details: notes ?? 'Approval rejected by user',
+                total_tokens: 0,
+                total_duration_ms: 0,
+                last_step_id: approval.step_id,
+            });
         }
     }
 
@@ -509,7 +919,7 @@ export class Orchestrator {
         longTerm: string;
     }> {
         return {
-            recent: await this.tier1.getContextString(taskId),
+            recent: await this.tier1.getContextString(projectId),
             summaries: await this.tier2.getContextString(projectId),
             longTerm: await this.tier3.getContextString(projectId, query),
         };

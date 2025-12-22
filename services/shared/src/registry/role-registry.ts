@@ -3,13 +3,15 @@
  * Manages agent role definitions in Redis
  */
 
-import type { AgentType } from '@mother-harness/shared';
+import type { AgentType, AgentContract, RoleRegistryEntry } from '@mother-harness/shared';
 import { getRedisJSON } from '@mother-harness/shared';
 import { type RoleDefinition, DEFAULT_ROLES } from '../types/role.js';
+import { DEFAULT_AGENT_CONTRACTS } from '../types/contract.js';
 
 export class RoleRegistry {
     private redis = getRedisJSON();
     private readonly keyPrefix = 'role:';
+    private readonly registryPrefix = 'role_registry:';
 
     /**
      * Initialize registry with default roles
@@ -19,6 +21,12 @@ export class RoleRegistry {
             const exists = await this.redis.exists(`${this.keyPrefix}${agentType}`);
             if (!exists) {
                 await this.registerRole(role);
+            }
+        }
+        for (const [agentType, contract] of Object.entries(DEFAULT_AGENT_CONTRACTS)) {
+            const exists = await this.redis.exists(`${this.registryPrefix}${agentType}`);
+            if (!exists) {
+                await this.registerContract(contract);
             }
         }
         console.log('[RoleRegistry] Initialized with default roles');
@@ -32,10 +40,35 @@ export class RoleRegistry {
     }
 
     /**
+     * Register an agent contract
+     */
+    async registerContract(contract: AgentContract): Promise<void> {
+        await this.redis.set(`${this.registryPrefix}${contract.agent}`, '$', {
+            ...contract,
+            registered_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        });
+    }
+
+    /**
+     * Register full role registry entry
+     */
+    async registerEntry(entry: RoleRegistryEntry): Promise<void> {
+        await this.redis.set(`${this.registryPrefix}${entry.agent}`, '$', entry);
+    }
+
+    /**
      * Get role definition
      */
     async getRole(agentType: AgentType): Promise<RoleDefinition | null> {
         return await this.redis.get<RoleDefinition>(`${this.keyPrefix}${agentType}`);
+    }
+
+    /**
+     * Get agent contract
+     */
+    async getContract(agentType: AgentType): Promise<AgentContract | null> {
+        return await this.redis.get<AgentContract>(`${this.registryPrefix}${agentType}`);
     }
 
     /**
@@ -54,6 +87,21 @@ export class RoleRegistry {
     }
 
     /**
+     * Get all registered contracts
+     */
+    async getAllContracts(): Promise<AgentContract[]> {
+        const keys = await this.redis.keys(`${this.registryPrefix}*`);
+        const contracts: AgentContract[] = [];
+
+        for (const key of keys) {
+            const contract = await this.redis.get<AgentContract>(key);
+            if (contract) contracts.push(contract);
+        }
+
+        return contracts;
+    }
+
+    /**
      * Get enabled roles only
      */
     async getEnabledRoles(): Promise<RoleDefinition[]> {
@@ -66,6 +114,22 @@ export class RoleRegistry {
      */
     async setRoleEnabled(agentType: AgentType, enabled: boolean): Promise<void> {
         await this.redis.set(`${this.keyPrefix}${agentType}`, '$.enabled', enabled);
+    }
+
+    /**
+     * Update contract allowlist
+     */
+    async setContractAllowlist(agentType: AgentType, allowlist: string[]): Promise<void> {
+        await this.redis.set(`${this.registryPrefix}${agentType}`, '$.action_allowlist', allowlist);
+        await this.redis.set(`${this.registryPrefix}${agentType}`, '$.updated_at', new Date().toISOString());
+    }
+
+    /**
+     * Update contract required artifacts
+     */
+    async setRequiredArtifacts(agentType: AgentType, required: string[]): Promise<void> {
+        await this.redis.set(`${this.registryPrefix}${agentType}`, '$.required_artifacts', required);
+        await this.redis.set(`${this.registryPrefix}${agentType}`, '$.updated_at', new Date().toISOString());
     }
 
     /**

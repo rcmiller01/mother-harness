@@ -15,6 +15,13 @@ export type {
 } from './role.js';
 export { DEFAULT_ROLES } from './role.js';
 
+// Contract types
+export type { AgentContract } from './contract.js';
+export { DEFAULT_AGENT_CONTRACTS } from './contract.js';
+
+// Registry types
+export type { RoleRegistryEntry } from './registry.js';
+
 
 // Task types
 export type {
@@ -59,6 +66,9 @@ export type {
 } from './document.js';
 export { createLibrary } from './document.js';
 
+// Retrieval report types
+export type { RetrievalChunkSummary, RetrievalReport } from './retrieval.js';
+
 // Result types
 export type {
     TerminationReason,
@@ -69,3 +79,6 @@ export type {
     ResultEnvelope,
 } from './result.js';
 export { createSuccessResult, createErrorResult } from './result.js';
+
+// Run types
+export type { RunStatus, Run } from './run.js';

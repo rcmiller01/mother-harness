@@ -180,6 +180,7 @@ export const ApprovalPreviewSchema = z.object({
 
 export const ApprovalSchema = z.object({
     id: z.string(),
+    run_id: z.string(),
     task_id: z.string(),
     project_id: z.string(),
     step_id: z.string(),
@@ -226,6 +227,9 @@ export const DocumentChunkSchema = z.object({
     section_title: z.string().optional(),
     hierarchy: z.array(z.string()),
     chunk_type: ChunkTypeSchema,
+    chunk_index: z.number(),
+    total_chunks: z.number(),
+    content_hash: z.string(),
     indexed_at: z.string().datetime(),
     source_modified_at: z.string().datetime(),
     searchable: z.boolean(),
@@ -237,6 +241,7 @@ export const LibrarySchema = z.object({
     folder_path: z.string(),
     description: z.string().optional(),
     document_count: z.number(),
+    chunk_count: z.number(),
     total_size_bytes: z.number(),
     last_scanned: z.string().datetime(),
     scan_status: ScanStatusSchema,
@@ -282,6 +287,31 @@ export const TerminationRecordSchema = z.object({
     total_duration_ms: z.number(),
     started_at: z.string().datetime(),
     terminated_at: z.string().datetime(),
+});
+
+// ============ Run Schemas ============
+
+export const RunStatusSchema = z.enum([
+    'created',
+    'executing',
+    'waiting_approval',
+    'terminated',
+]);
+
+export const RunSchema = z.object({
+    id: z.string(),
+    task_id: z.string(),
+    project_id: z.string(),
+    user_id: z.string(),
+    status: RunStatusSchema,
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+    started_at: z.string().datetime().optional(),
+    terminated_at: z.string().datetime().optional(),
+    termination_reason: TerminationReasonSchema.optional(),
+    termination_details: z.string().optional(),
+    total_tokens: z.number().optional(),
+    total_duration_ms: z.number().optional(),
 });
 
 export const ResultEnvelopeSchema = z.object({
