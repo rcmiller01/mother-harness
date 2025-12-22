@@ -1,77 +1,53 @@
 'use client';
 
-import { useState, useEffect, FormEvent, type CSSProperties } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useAuth, getAuthHeaders } from '../lib/auth';
 
-type Project = {
+interface RunHistoryItem {
     id: string;
-    name: string;
-    type: string;
-    status: string;
-    threads: string[];
-    last_activity: string;
-};
-
-type Run = {
-    id: string;
-    task_id: string;
-    project_id: string;
     status: string;
     created_at: string;
     updated_at: string;
-};
-
-type Artifact = {
-    id: string;
-    name: string;
-    type: string;
-    format: string;
-    content?: string;
-    created_at: string;
-};
-
-type Library = {
-    id: string;
-    name: string;
-    folder_path: string;
-    description?: string;
-    document_count: number;
-    scan_status: string;
-    last_scanned: string;
-    auto_scan: boolean;
-};
-
-type ApprovalPreview = {
-    files?: string[];
-    commands?: string[];
-    workflow?: Record<string, unknown>;
-    api_calls?: Array<{ method: string; url: string; description: string }>;
-};
-
-type Approval = {
-    id: string;
     task_id: string;
-    run_id: string;
-    project_id: string;
-    type: string;
-    description: string;
-    risk_level: string;
-    preview: ApprovalPreview;
-    created_at: string;
-};
+}
 
-const cardStyle: CSSProperties = {
-    padding: '1rem',
-    border: '1px solid #e5e5e5',
-    borderRadius: '12px',
-    backgroundColor: '#fff',
-};
+interface BudgetSummary {
+    status: {
+        daily_spend: number;
+        monthly_spend: number;
+        daily_remaining: number;
+        monthly_remaining: number;
+        daily_warning: boolean;
+        monthly_warning: boolean;
+        can_use_cloud: boolean;
+    };
+    usage: {
+        daily: Record<string, number>;
+        monthly: Record<string, number>;
+        by_model: Record<string, number>;
+    };
+}
+
+interface ActivityMetricsSnapshot {
+    user_id: string;
+    days: Array<{
+        date: string;
+        activity: Record<string, number>;
+        errors: Record<string, number>;
+        runs: Record<string, number>;
+    }>;
+}
 
 export default function HomePage() {
     const { user, loading: authLoading, isAuthenticated, login, logout } = useAuth();
     const [query, setQuery] = useState('');
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<{ task_id: string; status: string } | null>(null);
+    const [runHistory, setRunHistory] = useState<RunHistoryItem[]>([]);
+    const [budgetSummary, setBudgetSummary] = useState<BudgetSummary | null>(null);
+    const [activityMetrics, setActivityMetrics] = useState<ActivityMetricsSnapshot | null>(null);
+    const [dashboardLoading, setDashboardLoading] = useState(false);
+    const [dashboardError, setDashboardError] = useState('');
 
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectLoading, setProjectLoading] = useState(false);
@@ -260,95 +236,48 @@ export default function HomePage() {
         }
     };
 
-    const handleCreateLibrary = async (e: FormEvent) => {
-        e.preventDefault();
-        setLibraryMessage('');
-        try {
-            const response = await fetch('/api/libraries', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders(),
-                },
-                body: JSON.stringify({
-                    name: libraryName,
-                    folder_path: libraryPath,
-                    description: libraryDescription || undefined,
-                    auto_scan: libraryAutoScan,
-                }),
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                setLibraryMessage(error.error ?? 'Failed to create library');
-                return;
-            }
-
-            setLibraryName('');
-            setLibraryPath('');
-            setLibraryDescription('');
-            setLibraryAutoScan(true);
-            setLibraryMessage('Library created successfully.');
-            fetchLibraries(librarySearch);
-        } catch (error) {
-            console.error('Failed to create library:', error);
-            setLibraryMessage('Failed to create library');
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) {
+            setRunHistory([]);
+            setBudgetSummary(null);
+            setActivityMetrics(null);
+            return;
         }
-    };
 
-    const handleRescanLibrary = async (libraryId: string) => {
-        setLibraryMessage('');
-        try {
-            const response = await fetch(`/api/libraries/${libraryId}/rescan`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-            });
-            if (!response.ok) {
-                const error = await response.json();
-                setLibraryMessage(error.error ?? 'Failed to rescan library');
-                return;
+        const loadDashboardData = async () => {
+            setDashboardLoading(true);
+            setDashboardError('');
+
+            try {
+                const [runsResponse, budgetResponse, metricsResponse] = await Promise.all([
+                    fetch(`/api/runs?user_id=${user.id}`),
+                    fetch(`/api/budget?user_id=${user.id}`),
+                    fetch(`/api/metrics/activity?user_id=${user.id}&days=7`),
+                ]);
+
+                if (!runsResponse.ok || !budgetResponse.ok || !metricsResponse.ok) {
+                    throw new Error('Failed to load dashboard data');
+                }
+
+                const runsData = await runsResponse.json();
+                const budgetData = await budgetResponse.json();
+                const metricsData = await metricsResponse.json();
+
+                setRunHistory(runsData);
+                setBudgetSummary(budgetData);
+                setActivityMetrics(metricsData);
+            } catch (error) {
+                console.error('Failed to load dashboard data', error);
+                setDashboardError('Unable to load dashboard data.');
+            } finally {
+                setDashboardLoading(false);
             }
-            fetchLibraries(librarySearch);
-        } catch (error) {
-            console.error('Failed to rescan library:', error);
-            setLibraryMessage('Failed to rescan library');
-        }
-    };
+        };
 
-    const handleLibrarySearch = async (e: FormEvent) => {
-        e.preventDefault();
-        fetchLibraries(librarySearch);
-    };
+        loadDashboardData();
+    }, [isAuthenticated, user?.id]);
 
-    const handleApprovalResponse = async (approvalId: string, approved: boolean) => {
-        setApprovalMessage('');
-        try {
-            const response = await fetch(`/api/approvals/${approvalId}/respond`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders(),
-                },
-                body: JSON.stringify({
-                    approved,
-                    notes: approvalNotes[approvalId],
-                }),
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                setApprovalMessage(error.error ?? 'Failed to respond to approval');
-                return;
-            }
-
-            setApprovalNotes((prev) => ({ ...prev, [approvalId]: '' }));
-            setApprovalMessage(approved ? 'Approval submitted.' : 'Approval rejected.');
-            fetchApprovals();
-        } catch (error) {
-            console.error('Failed to respond to approval:', error);
-            setApprovalMessage('Failed to respond to approval');
-        }
-    };
+    const formatCurrency = (value: number) => `$${value.toFixed(2)}`;
 
     if (authLoading) {
         return (
@@ -654,384 +583,116 @@ export default function HomePage() {
                         </div>
                     )}
                 </div>
+            )}
 
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h2 style={{ margin: 0 }}>Run Status</h2>
-                        <button
-                            type="button"
-                            onClick={fetchRuns}
-                            style={{
-                                padding: '0.4rem 0.75rem',
-                                borderRadius: '6px',
-                                border: '1px solid #ddd',
-                                backgroundColor: 'white',
-                                cursor: 'pointer',
-                                fontSize: '0.875rem',
-                            }}
-                        >
-                            Refresh
-                        </button>
-                    </div>
-                    {runsLoading ? (
-                        <p style={{ color: '#666' }}>Loading runs...</p>
-                    ) : (
-                        <div style={{ marginTop: '1rem' }}>
-                            {runs.length === 0 ? (
+            <section style={{ marginTop: '3rem' }}>
+                <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Operational Dashboards</h2>
+                {!isAuthenticated && (
+                    <p style={{ color: '#666' }}>Sign in to view run history, budgets, and error trends.</p>
+                )}
+                {isAuthenticated && dashboardError && (
+                    <p style={{ color: 'red' }}>{dashboardError}</p>
+                )}
+                {isAuthenticated && dashboardLoading && (
+                    <p style={{ color: '#666' }}>Loading dashboard data...</p>
+                )}
+
+                {isAuthenticated && !dashboardLoading && (
+                    <div style={{ display: 'grid', gap: '1.5rem' }}>
+                        <div style={{ border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Run History</h3>
+                            {runHistory.length === 0 ? (
                                 <p style={{ color: '#666' }}>No runs yet.</p>
                             ) : (
-                                <>
-                                    <div style={{ marginBottom: '1rem' }}>
-                                        <label htmlFor="run-select" style={{ fontSize: '0.875rem', color: '#555' }}>
-                                            Select run
-                                        </label>
-                                        <select
-                                            id="run-select"
-                                            value={selectedRunId ?? ''}
-                                            onChange={(e) => setSelectedRunId(e.target.value || null)}
-                                            style={{
-                                                padding: '0.5rem',
-                                                borderRadius: '6px',
-                                                border: '1px solid #ddd',
-                                                width: '100%',
-                                                marginTop: '0.5rem',
-                                            }}
-                                        >
-                                            {runs.map((run) => (
-                                                <option key={run.id} value={run.id}>
-                                                    {run.id} · {run.status}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div style={{ display: 'grid', gap: '0.75rem' }}>
-                                        {runs.slice(0, 4).map((run) => (
-                                            <div key={run.id} style={{ padding: '0.75rem', border: '1px solid #eee', borderRadius: '8px' }}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <strong>{run.id}</strong>
-                                                    <span style={{ fontSize: '0.75rem', color: '#666' }}>{run.status}</span>
-                                                </div>
-                                                <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.25rem' }}>
-                                                    Task: {run.task_id}
-                                                </div>
-                                                <div style={{ fontSize: '0.75rem', color: '#999', marginTop: '0.25rem' }}>
-                                                    Updated {new Date(run.updated_at).toLocaleString()}
-                                                </div>
-                                            </div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ textAlign: 'left', color: '#666' }}>
+                                            <th style={{ paddingBottom: '0.5rem' }}>Run</th>
+                                            <th style={{ paddingBottom: '0.5rem' }}>Status</th>
+                                            <th style={{ paddingBottom: '0.5rem' }}>Created</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {runHistory.slice(0, 6).map((run) => (
+                                            <tr key={run.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                                                <td style={{ padding: '0.5rem 0', fontWeight: 500 }}>{run.id}</td>
+                                                <td style={{ padding: '0.5rem 0', textTransform: 'capitalize' }}>{run.status}</td>
+                                                <td style={{ padding: '0.5rem 0', color: '#666' }}>{new Date(run.created_at).toLocaleString()}</td>
+                                            </tr>
                                         ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+
+                        <div style={{ border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Budget Usage</h3>
+                            {budgetSummary ? (
+                                <>
+                                    <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+                                        <div>
+                                            <p style={{ margin: 0, color: '#666' }}>Daily Spend</p>
+                                            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
+                                                {formatCurrency(budgetSummary.status.daily_spend)}
+                                            </p>
+                                            <p style={{ margin: 0, color: budgetSummary.status.daily_warning ? '#d97706' : '#666' }}>
+                                                Remaining: {formatCurrency(budgetSummary.status.daily_remaining)}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p style={{ margin: 0, color: '#666' }}>Monthly Spend</p>
+                                            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
+                                                {formatCurrency(budgetSummary.status.monthly_spend)}
+                                            </p>
+                                            <p style={{ margin: 0, color: budgetSummary.status.monthly_warning ? '#d97706' : '#666' }}>
+                                                Remaining: {formatCurrency(budgetSummary.status.monthly_remaining)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div style={{ marginTop: '1rem' }}>
+                                        <p style={{ marginBottom: '0.5rem', color: '#666' }}>Spend by Model (Monthly)</p>
+                                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                            {Object.entries(budgetSummary.usage.by_model).map(([model, spend]) => (
+                                                <li key={model} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
+                                                    <span>{model}</span>
+                                                    <span style={{ fontWeight: 500 }}>{formatCurrency(spend)}</span>
+                                                </li>
+                                            ))}
+                                            {Object.keys(budgetSummary.usage.by_model).length === 0 && (
+                                                <li style={{ color: '#666' }}>No spend recorded yet.</li>
+                                            )}
+                                        </ul>
                                     </div>
                                 </>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                <div style={cardStyle}>
-                    <h2 style={{ marginTop: 0 }}>Artifacts View</h2>
-                    {selectedRunId ? (
-                        <>
-                            {artifactLoading ? (
-                                <p style={{ color: '#666' }}>Loading artifacts...</p>
                             ) : (
-                                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                                    {artifacts.length === 0 ? (
-                                        <p style={{ color: '#666' }}>No artifacts for this run yet.</p>
-                                    ) : (
-                                        artifacts.map((artifact) => (
-                                            <div key={artifact.id} style={{ padding: '0.75rem', border: '1px solid #eee', borderRadius: '8px' }}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <strong>{artifact.name}</strong>
-                                                    <span style={{ fontSize: '0.75rem', color: '#666' }}>{artifact.type}</span>
-                                                </div>
-                                                <div style={{ fontSize: '0.75rem', color: '#999', marginTop: '0.25rem' }}>
-                                                    Format: {artifact.format}
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => fetchArtifactDetail(artifact.id)}
-                                                    style={{
-                                                        marginTop: '0.5rem',
-                                                        padding: '0.4rem 0.75rem',
-                                                        borderRadius: '6px',
-                                                        border: '1px solid #ddd',
-                                                        backgroundColor: 'white',
-                                                        cursor: 'pointer',
-                                                        fontSize: '0.75rem',
-                                                    }}
-                                                >
-                                                    View details
-                                                </button>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
+                                <p style={{ color: '#666' }}>Budget data unavailable.</p>
                             )}
-                        </>
-                    ) : (
-                        <p style={{ color: '#666' }}>Select a run to view artifacts.</p>
-                    )}
-                    {selectedArtifact && (
-                        <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#f9f9f9', borderRadius: '8px' }}>
-                            <strong>{selectedArtifact.name}</strong>
-                            <p style={{ fontSize: '0.75rem', color: '#666' }}>{selectedArtifact.type} · {selectedArtifact.format}</p>
-                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.75rem', color: '#333' }}>
-                                {selectedArtifact.content ?? 'No content available.'}
-                            </pre>
                         </div>
-                    )}
-                </div>
-            </section>
 
-            <section style={{ marginBottom: '2.5rem', display: 'grid', gap: '1.5rem' }}>
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h2 style={{ margin: 0 }}>Library Management</h2>
-                        <button
-                            type="button"
-                            onClick={() => fetchLibraries(librarySearch)}
-                            style={{
-                                padding: '0.4rem 0.75rem',
-                                borderRadius: '6px',
-                                border: '1px solid #ddd',
-                                backgroundColor: 'white',
-                                cursor: 'pointer',
-                                fontSize: '0.875rem',
-                            }}
-                        >
-                            Refresh
-                        </button>
-                    </div>
-                    <form onSubmit={handleLibrarySearch} style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <input
-                            type="text"
-                            value={librarySearch}
-                            onChange={(e) => setLibrarySearch(e.target.value)}
-                            placeholder="Search libraries"
-                            style={{
-                                flex: '1 1 220px',
-                                padding: '0.5rem',
-                                borderRadius: '6px',
-                                border: '1px solid #ddd',
-                            }}
-                        />
-                        <button
-                            type="submit"
-                            style={{
-                                padding: '0.5rem 1rem',
-                                borderRadius: '6px',
-                                border: '1px solid #ddd',
-                                backgroundColor: 'white',
-                                cursor: 'pointer',
-                                fontSize: '0.875rem',
-                            }}
-                        >
-                            Search
-                        </button>
-                    </form>
-                    {libraryLoading ? (
-                        <p style={{ color: '#666' }}>Loading libraries...</p>
-                    ) : (
-                        <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-                            {libraries.length === 0 ? (
-                                <p style={{ color: '#666' }}>No libraries found.</p>
+                        <div style={{ border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Error Trends (Last 7 Days)</h3>
+                            {activityMetrics ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                    {activityMetrics.days.map((day) => {
+                                        const totalErrors = Object.values(day.errors).reduce((sum, value) => sum + value, 0);
+                                        const barWidth = Math.min(totalErrors * 20, 240);
+                                        return (
+                                            <div key={day.date} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <span style={{ width: '90px', fontSize: '0.8rem', color: '#666' }}>{day.date}</span>
+                                                <div style={{ flex: 1, backgroundColor: '#f3f4f6', borderRadius: '999px', overflow: 'hidden' }}>
+                                                    <div style={{ width: `${barWidth}px`, height: '8px', backgroundColor: totalErrors > 0 ? '#ef4444' : '#a3a3a3' }} />
+                                                </div>
+                                                <span style={{ minWidth: '24px', textAlign: 'right', fontSize: '0.8rem' }}>{totalErrors}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             ) : (
-                                libraries.map((library) => (
-                                    <div key={library.id} style={{ padding: '0.75rem', border: '1px solid #eee', borderRadius: '8px' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                            <div>
-                                                <strong>{library.name}</strong>
-                                                <p style={{ margin: 0, fontSize: '0.75rem', color: '#666' }}>{library.folder_path}</p>
-                                            </div>
-                                            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#666' }}>
-                                                <div>{library.scan_status}</div>
-                                                <div>{library.document_count} docs</div>
-                                            </div>
-                                        </div>
-                                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                            <span style={{ fontSize: '0.75rem', color: '#999' }}>
-                                                Last scanned {new Date(library.last_scanned).toLocaleString()}
-                                            </span>
-                                            <span style={{ fontSize: '0.75rem', color: '#999' }}>
-                                                Auto-scan {library.auto_scan ? 'on' : 'off'}
-                                            </span>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleRescanLibrary(library.id)}
-                                            style={{
-                                                marginTop: '0.5rem',
-                                                padding: '0.4rem 0.75rem',
-                                                borderRadius: '6px',
-                                                border: '1px solid #ddd',
-                                                backgroundColor: 'white',
-                                                cursor: 'pointer',
-                                                fontSize: '0.75rem',
-                                            }}
-                                        >
-                                            Rescan
-                                        </button>
-                                    </div>
-                                ))
+                                <p style={{ color: '#666' }}>No error data available.</p>
                             )}
                         </div>
-                    )}
-                    {libraryMessage && (
-                        <p style={{ marginTop: '0.75rem', color: '#d14545', fontSize: '0.875rem' }}>{libraryMessage}</p>
-                    )}
-                </div>
-
-                <div style={cardStyle}>
-                    <h2 style={{ marginTop: 0 }}>Add Library</h2>
-                    <form onSubmit={handleCreateLibrary} style={{ display: 'grid', gap: '0.75rem' }}>
-                        <input
-                            type="text"
-                            value={libraryName}
-                            onChange={(e) => setLibraryName(e.target.value)}
-                            placeholder="Library name"
-                            style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ddd' }}
-                            required
-                        />
-                        <input
-                            type="text"
-                            value={libraryPath}
-                            onChange={(e) => setLibraryPath(e.target.value)}
-                            placeholder="Folder path"
-                            style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ddd' }}
-                            required
-                        />
-                        <textarea
-                            value={libraryDescription}
-                            onChange={(e) => setLibraryDescription(e.target.value)}
-                            placeholder="Description (optional)"
-                            style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ddd', minHeight: '80px' }}
-                        />
-                        <label style={{ fontSize: '0.875rem', color: '#555', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            <input
-                                type="checkbox"
-                                checked={libraryAutoScan}
-                                onChange={(e) => setLibraryAutoScan(e.target.checked)}
-                            />
-                            Enable auto-scan
-                        </label>
-                        <button
-                            type="submit"
-                            style={{
-                                padding: '0.6rem 1rem',
-                                borderRadius: '6px',
-                                border: 'none',
-                                backgroundColor: '#0070f3',
-                                color: 'white',
-                                cursor: 'pointer',
-                                fontSize: '0.875rem',
-                            }}
-                        >
-                            Add Library
-                        </button>
-                    </form>
-                </div>
-            </section>
-
-            <section style={{ marginBottom: '2.5rem' }}>
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h2 style={{ margin: 0 }}>Approvals</h2>
-                        <button
-                            type="button"
-                            onClick={fetchApprovals}
-                            style={{
-                                padding: '0.4rem 0.75rem',
-                                borderRadius: '6px',
-                                border: '1px solid #ddd',
-                                backgroundColor: 'white',
-                                cursor: 'pointer',
-                                fontSize: '0.875rem',
-                            }}
-                        >
-                            Refresh
-                        </button>
                     </div>
-                    {approvalsLoading ? (
-                        <p style={{ color: '#666' }}>Loading approvals...</p>
-                    ) : approvals.length === 0 ? (
-                        <p style={{ color: '#666' }}>No pending approvals.</p>
-                    ) : (
-                        <div style={{ marginTop: '1rem', display: 'grid', gap: '1rem' }}>
-                            {approvals.map((approval) => (
-                                <div key={approval.id} style={{ padding: '0.75rem', border: '1px solid #eee', borderRadius: '8px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <strong>{approval.type}</strong>
-                                        <span style={{ fontSize: '0.75rem', color: '#666' }}>{approval.risk_level} risk</span>
-                                    </div>
-                                    <p style={{ margin: '0.5rem 0', fontSize: '0.875rem' }}>{approval.description}</p>
-                                    <div style={{ fontSize: '0.75rem', color: '#666' }}>
-                                        <div>Approval ID: {approval.id}</div>
-                                        <div>Run: {approval.run_id}</div>
-                                        <div>Task: {approval.task_id}</div>
-                                    </div>
-                                    {approval.preview?.files && approval.preview.files.length > 0 && (
-                                        <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
-                                            <strong>Files</strong>: {approval.preview.files.join(', ')}
-                                        </div>
-                                    )}
-                                    {approval.preview?.commands && approval.preview.commands.length > 0 && (
-                                        <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#666' }}>
-                                            <strong>Commands</strong>: {approval.preview.commands.join(', ')}
-                                        </div>
-                                    )}
-                                    <textarea
-                                        value={approvalNotes[approval.id] ?? ''}
-                                        onChange={(e) =>
-                                            setApprovalNotes((prev) => ({ ...prev, [approval.id]: e.target.value }))
-                                        }
-                                        placeholder="Optional notes"
-                                        style={{
-                                            width: '100%',
-                                            marginTop: '0.5rem',
-                                            padding: '0.5rem',
-                                            borderRadius: '6px',
-                                            border: '1px solid #ddd',
-                                            minHeight: '60px',
-                                        }}
-                                    />
-                                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleApprovalResponse(approval.id, true)}
-                                            style={{
-                                                padding: '0.5rem 1rem',
-                                                borderRadius: '6px',
-                                                border: 'none',
-                                                backgroundColor: '#16a34a',
-                                                color: 'white',
-                                                cursor: 'pointer',
-                                                fontSize: '0.75rem',
-                                            }}
-                                        >
-                                            Approve
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleApprovalResponse(approval.id, false)}
-                                            style={{
-                                                padding: '0.5rem 1rem',
-                                                borderRadius: '6px',
-                                                border: '1px solid #ddd',
-                                                backgroundColor: 'white',
-                                                cursor: 'pointer',
-                                                fontSize: '0.75rem',
-                                            }}
-                                        >
-                                            Reject
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    {approvalMessage && (
-                        <p style={{ marginTop: '0.75rem', color: '#d14545', fontSize: '0.875rem' }}>{approvalMessage}</p>
-                    )}
-                </div>
+                )}
             </section>
         </main>
     );

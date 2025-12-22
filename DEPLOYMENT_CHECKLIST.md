@@ -29,6 +29,11 @@
 ### Required Environment Variables
 Before deploying, ensure `.env` file contains:
 - `REDIS_PASSWORD` - Redis authentication password
+- `REDIS_USERNAME` - Redis ACL user (for example: orchestrator)
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID for sign-in
+- `GOOGLE_ALLOWED_DOMAINS` - Comma-separated allowed domains (optional)
+- `GOOGLE_ADMIN_EMAILS` - Comma-separated admin emails (optional)
+- `GOOGLE_APPROVER_EMAILS` - Comma-separated approver emails (optional)
 - `OLLAMA_LOCAL_URL` - Local Ollama instance URL (default: http://core2:11434)
 - `OLLAMA_CLOUD_API_KEY` - Optional cloud API key
 - `N8N_URL` - n8n instance URL (default: http://n8n:5678)
@@ -63,17 +68,24 @@ Before deploying, ensure `.env` file contains:
    - Default: `redis://:password@redis-stack:6379`
    - Update REDIS_URL if using external Redis
 
-3. **Start services**
+3. **Configure Redis ACL users**
+   - Rotate the default ACL passwords in `.env`
+   - Apply ACL config via `redis-cli` (example):
+     ```bash
+     ACL SETUSER orchestrator on >${REDIS_ACL_ORCHESTRATOR_PASSWORD} +get +set +del +keys +json.* +ft.* +xadd +xread +xreadgroup +xack +hget +hset +hgetall +hincrby +hincrbyfloat +expire +exists +ping ~task:* ~project:* ~approval:* ~model_decision:* ~cost:* ~budget:* ~retry:*
+     ```
+
+4. **Start services**
    ```bash
    docker-compose up -d
    ```
 
-4. **Verify health**
+5. **Verify health**
    ```bash
    curl http://localhost:8000/health
    ```
 
-5. **Check logs**
+6. **Check logs**
    ```bash
    docker-compose logs -f orchestrator
    ```
@@ -90,7 +102,7 @@ Before deploying, ensure `.env` file contains:
 1. **Create Libraries**: Use API or Redis directly to create library entries
 2. **Configure n8n Workflows**: Import workflows from `n8n-workflows/` directory
 3. **Set up Ollama Models**: Ensure required models are pulled on Ollama host
-4. **Configure Access Control**: Set up Redis ACL users if needed
+4. **Configure Access Control**: Set up Redis ACL users and Google authentication
 
 ## 📝 Notes
 
@@ -98,4 +110,3 @@ Before deploying, ensure `.env` file contains:
 - Build artifacts are in `dist/` directories
 - Redis indexes are created automatically on first run
 - Services gracefully handle missing optional dependencies (n8n, Ollama cloud)
-

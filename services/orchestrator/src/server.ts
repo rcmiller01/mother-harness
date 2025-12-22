@@ -6,9 +6,18 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
-import { getRedisClient, closeRedisClient, createAllIndexes, checkIndexesExist } from '@mother-harness/shared';
+import {
+    getRedisClient,
+    closeRedisClient,
+    createAllIndexes,
+    checkIndexesExist,
+    logAuditEvent,
+    redactPIIFromObject,
+    resolveLibraryAccess,
+} from '@mother-harness/shared';
 import { Orchestrator } from './orchestrator.js';
 import { config } from './config.js';
+import { registerAuth, requireRole, type UserSession } from './auth.js';
 
 // Create Fastify instance
 const app = Fastify({
@@ -22,6 +31,7 @@ const app = Fastify({
 
 // Orchestrator instance
 let orchestrator: Orchestrator;
+let metricsConsumer: ReturnType<typeof startActivityMetricsConsumer> | null = null;
 
 // Register plugins
 async function registerPlugins() {
@@ -30,6 +40,7 @@ async function registerPlugins() {
     });
 
     await app.register(websocket);
+    await registerAuth(app);
 }
 
 // Health check endpoint
@@ -44,8 +55,23 @@ app.get('/health', async () => {
 });
 
 // API routes
-app.post('/api/ask', async (request, reply) => {
-    const body = request.body as { query: string; project_id?: string; user_id: string };
+app.post('/api/ask', { preHandler: requireRole('user', 'admin') }, async (request, reply) => {
+    const body = request.body as { query: string; project_id?: string; library_ids?: string[] };
+    const user = (request as any).user as UserSession;
+    const requestedLibraries = body.library_ids ?? [];
+    const allowedLibraryIds = process.env['LIBRARY_ALLOWED_IDS']
+        ?.split(',')
+        .map(entry => entry.trim())
+        .filter(Boolean);
+
+    const access = resolveLibraryAccess(requestedLibraries, user.roles, {
+        allowedLibraryIds,
+    });
+
+    if (access.denied.length > 0) {
+        reply.status(403);
+        return { error: 'Library access denied', denied: access.denied };
+    }
 
     try {
         const { run, task } = await orchestrator.createRun(
@@ -162,22 +188,42 @@ app.get('/api/task/:id', async (request, reply) => {
     }
 });
 
-app.get('/api/projects', async (request) => {
-    const { user_id } = request.query as { user_id: string };
-    return await orchestrator.listProjects(user_id);
+app.get('/api/projects', { preHandler: requireRole('user', 'admin') }, async (request) => {
+    const { user_id } = request.query as { user_id?: string };
+    const user = (request as any).user as UserSession;
+    const requestedUserId = user.roles.includes('admin') && user_id ? user_id : user.user_id;
+    return await orchestrator.listProjects(requestedUserId);
 });
 
-app.get('/api/approvals/pending', async (request) => {
-    const { user_id } = request.query as { user_id: string };
-    return await orchestrator.getPendingApprovals(user_id);
+app.get('/api/approvals/pending', { preHandler: requireRole('user', 'approver', 'admin') }, async (request) => {
+    const user = (request as any).user as UserSession;
+    return await orchestrator.getPendingApprovals(user.user_id);
 });
 
-app.post('/api/approvals/:id/respond', async (request, reply) => {
+app.post('/api/approvals/:id/respond', { preHandler: requireRole('approver', 'admin') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { approved, notes } = request.body as { approved: boolean; notes?: string };
+    const user = (request as any).user as UserSession;
 
     try {
         await orchestrator.respondToApproval(id, approved, notes);
+        await logAuditEvent({
+            type: 'approval_responded',
+            action: approved ? 'approved' : 'rejected',
+            actor: {
+                user_id: user.user_id,
+                email: user.email,
+                roles: user.roles,
+            },
+            resource: {
+                type: 'approval',
+                id,
+            },
+            metadata: {
+                notes,
+            },
+            status: 'success',
+        });
         return { success: true };
     } catch (error) {
         app.log.error(error, 'Failed to respond to approval');
@@ -240,7 +286,7 @@ app.post('/api/libraries/:id/rescan', async (request, reply) => {
 });
 
 // WebSocket endpoint for real-time task updates
-app.get('/ws', { websocket: true }, (connection, request) => {
+app.get('/ws', { websocket: true, preHandler: requireRole('user', 'admin') }, (connection, request) => {
     const { socket } = connection;
     const taskId = new URL(request.url, 'http://localhost').searchParams.get('task_id');
 
@@ -275,6 +321,44 @@ app.get('/ws', { websocket: true }, (connection, request) => {
     }));
 });
 
+app.addHook('onResponse', async (request, reply) => {
+    if (request.url === '/health' || request.url.startsWith('/ws')) {
+        return;
+    }
+
+    const user = (request as any).user as UserSession | undefined;
+    if (!user) return;
+
+    try {
+        await logAuditEvent({
+            type: 'access',
+            action: request.method,
+            actor: {
+                user_id: user.user_id,
+                email: user.email,
+                roles: user.roles,
+            },
+            resource: {
+                type: 'http',
+                id: request.routerPath ?? request.url,
+                attributes: {
+                    path: request.url,
+                },
+            },
+            metadata: {
+                status_code: reply.statusCode,
+                query: redactPIIFromObject(request.query),
+                body: request.body ? redactPIIFromObject(request.body) : undefined,
+            },
+            status: reply.statusCode < 400 ? 'success' : 'error',
+            ip: request.ip,
+            user_agent: request.headers['user-agent'],
+        });
+    } catch (error) {
+        app.log.warn({ error }, 'Failed to write audit log');
+    }
+});
+
 // Check Redis health
 async function checkRedisHealth(): Promise<boolean> {
     try {
@@ -306,6 +390,7 @@ async function start() {
 
         // Initialize orchestrator
         orchestrator = new Orchestrator();
+        metricsConsumer = startActivityMetricsConsumer();
 
         await app.listen({
             port: config.port,
@@ -322,6 +407,9 @@ async function start() {
 // Graceful shutdown
 async function shutdown() {
     app.log.info('Shutting down...');
+    if (metricsConsumer) {
+        await metricsConsumer.stop();
+    }
     await app.close();
     await closeRedisClient();
     process.exit(0);
