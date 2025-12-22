@@ -15,3 +15,10 @@ export {
     registerHandler,
     executeTool,
 } from './executor.js';
+
+export {
+    type ToolExecutionRequest,
+    type ToolExecutionResponse,
+    ToolExecutor,
+    getToolExecutor,
+} from './tool-executor.js';
