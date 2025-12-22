@@ -16,6 +16,7 @@ import {
     TaskSchema,
     ProjectSchema,
     ApprovalSchema,
+    logAuditEvent,
 } from '@mother-harness/shared';
 import { TaskPlanner } from './planner.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
@@ -369,6 +370,27 @@ export class Orchestrator {
         };
 
         await this.redis.set(`approval:${approval.id}`, '$', approval);
+        await logAuditEvent({
+            type: 'approval_requested',
+            action: approval.type,
+            actor: {
+                user_id: task.user_id,
+                roles: ['user'],
+            },
+            resource: {
+                type: 'approval',
+                id: approval.id,
+                attributes: {
+                    task_id: task.id,
+                    step_id: step.id,
+                },
+            },
+            metadata: {
+                description: step.description,
+                risk_level: approval.risk_level,
+            },
+            status: 'pending',
+        });
         return approval;
     }
 
