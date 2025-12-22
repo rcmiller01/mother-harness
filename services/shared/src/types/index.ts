@@ -66,6 +66,9 @@ export type {
 } from './document.js';
 export { createLibrary } from './document.js';
 
+// Retrieval report types
+export type { RetrievalChunkSummary, RetrievalReport } from './retrieval.js';
+
 // Result types
 export type {
     TerminationReason,
