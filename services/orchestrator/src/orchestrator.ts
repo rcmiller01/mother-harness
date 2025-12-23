@@ -35,6 +35,7 @@ import { Tier2Memory } from './memory/tier2-summaries.js';
 import { Tier3Memory } from './memory/tier3-longterm.js';
 import { logActivity } from './activity-stream.js';
 import { getCostTracker } from './cost-tracker.js';
+import { getApprovalService } from './approval-service.js';
 
 /** Agent dispatch result */
 interface AgentResult {
@@ -576,6 +577,39 @@ export class Orchestrator {
 
                 // Update step with result
                 await this.updateStepResult(taskId, step.id, result);
+
+                // Check if approval is needed based on the result
+                const approvalService = getApprovalService();
+                const approvalCheck = approvalService.shouldRequireApproval(step, task, result);
+
+                if (approvalCheck.required) {
+                    await this.createApprovalRequest(task, step, runId, result);
+                    await this.updateTaskStatus(taskId, 'approval_needed');
+                    await logActivity({
+                        type: 'approval_requested',
+                        run_id: runId,
+                        task_id: task.id,
+                        project_id: task.project_id,
+                        user_id: task.user_id,
+                        details: {
+                            step_id: step.id,
+                            agent: step.agent,
+                            reason: approvalCheck.reason,
+                            risk_level: approvalCheck.assessment.level,
+                        },
+                    });
+                    return {
+                        status: 'approval_needed',
+                        termination_reason: 'approval_required',
+                        termination_details: approvalCheck.reason ?? 'Approval required for this step',
+                        total_tokens: totalTokens,
+                        total_duration_ms: Date.now() - startTime,
+                        last_step_id: step.id,
+                        last_agent: step.agent,
+                    };
+                }
+
+                // Mark step as completed
                 await this.updateStepStatus(taskId, step.id, 'completed');
                 await logActivity({
                     type: 'step_completed',
@@ -880,21 +914,9 @@ export class Orchestrator {
     /**
      * Create approval request for a step
      */
-    private async createApprovalRequest(task: Task, step: TodoItem, runId: string): Promise<Approval> {
-        const approval: Approval = {
-            id: `approval-${nanoid()}`,
-            run_id: runId,
-            task_id: task.id,
-            project_id: task.project_id,
-            step_id: step.id,
-            user_id: task.user_id,
-            type: step.approval_type ?? 'code_execution',
-            description: step.description,
-            risk_level: step.risk ?? 'medium',
-            preview: {},
-            status: 'pending',
-            created_at: new Date().toISOString(),
-        };
+    private async createApprovalRequest(task: Task, step: TodoItem, runId: string, stepResult?: unknown): Promise<Approval> {
+        const approvalService = getApprovalService();
+        const approval = approvalService.createApprovalRequest(step, task, runId, stepResult);
 
         await this.redis.set(`approval:${approval.id}`, '$', approval);
         await logAuditEvent({

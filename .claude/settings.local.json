@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(chmod:*)",
+      "Bash(pnpm test:*)",
+      "Bash(npm run test:*)",
+      "Bash(git log:*)",
+      "Bash(npm test:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npm audit:*)",
+      "Bash(pnpm audit:*)",
+      "Bash(tee:*)"
     ]
   }
 }

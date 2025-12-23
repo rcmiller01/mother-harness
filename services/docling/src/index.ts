@@ -3,6 +3,7 @@
  * Starts the document ingestion service
  */
 
+import * as http from 'http';
 import { getRedisClient, getRedisJSON, type Library } from '@mother-harness/shared';
 import { getLibraryWatcher } from './watcher.js';
 import { getDocumentProcessor } from './processor.js';
@@ -12,10 +13,40 @@ const CONSUMER_GROUP = 'docling-processors';
 const CONSUMER_NAME = `processor-${process.pid}`;
 
 /**
+ * Start health check HTTP server
+ */
+function startHealthServer(): http.Server {
+    const server = http.createServer((req, res) => {
+        if (req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'healthy',
+                service: 'docling',
+                pid: process.pid,
+                uptime: process.uptime(),
+            }));
+        } else {
+            res.writeHead(404);
+            res.end();
+        }
+    });
+
+    const port = process.env['HEALTH_PORT'] ? parseInt(process.env['HEALTH_PORT']) : 8080;
+    server.listen(port, () => {
+        console.log(`[Docling] Health check server listening on port ${port}`);
+    });
+
+    return server;
+}
+
+/**
  * Start the Docling service
  */
 async function start(): Promise<void> {
     console.log('[Docling] Starting document ingestion service...');
+
+    // Start health check server
+    const healthServer = startHealthServer();
 
     const redis = getRedisClient();
     const redisJson = getRedisJSON();
@@ -32,6 +63,9 @@ async function start(): Promise<void> {
 
     // Start watching all auto-scan libraries
     await startWatchers(redisJson, watcher);
+
+    // Store health server reference for shutdown
+    (global as { healthServer?: http.Server }).healthServer = healthServer;
 
     // Process jobs from stream
     await processStream(redis, processor);
@@ -113,6 +147,12 @@ async function processStream(
  */
 async function shutdown(): Promise<void> {
     console.log('[Docling] Shutting down...');
+
+    // Close health server
+    const healthServer = (global as { healthServer?: http.Server }).healthServer;
+    if (healthServer) {
+        healthServer.close();
+    }
 
     const watcher = getLibraryWatcher();
     await watcher.stopAll();

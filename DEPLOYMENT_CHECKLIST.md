@@ -101,10 +101,20 @@ No known production blockers at this time. Optional services (n8n workflows and 
 
 ## 🔧 Post-Deployment Configuration
 
-1. **Create Libraries**: Use API or Redis directly to create library entries
-2. **Configure n8n Workflows**: Import workflows from `n8n-workflows/` directory
-3. **Set up Ollama Models**: Ensure required models are pulled on Ollama host
-4. **Configure Access Control**: Set up Redis ACL users and Google authentication
+1. **Set up Redis ACL users**:
+   ```bash
+   ./scripts/setup-redis-acl.sh
+   ```
+2. **Verify health checks**:
+   ```bash
+   curl http://localhost:8000/health  # Orchestrator
+   curl http://localhost:8080/health  # Docling
+   curl http://localhost:3000         # Dashboard
+   ```
+3. **Create Libraries**: Use API or Redis directly to create library entries
+4. **Configure n8n Workflows**: Import workflows from `n8n-workflows/` directory
+5. **Set up Ollama Models**: Ensure required models are pulled on Ollama host
+6. **Configure Google Authentication**: Set GOOGLE_CLIENT_ID and related env vars
 
 ## 📝 Notes
 

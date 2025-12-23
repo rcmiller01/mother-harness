@@ -6,6 +6,10 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
+import { readFileSync } from 'fs';
+import { parse as parseYaml } from 'yaml';
 import {
     getRedisClient,
     closeRedisClient,
@@ -20,6 +24,8 @@ import { getCostTracker } from './cost-tracker.js';
 import { config } from './config.js';
 import { registerAuth, requireRole, type UserSession } from './auth.js';
 import { registerProductionExecutors } from './executors/index.js';
+import { startActivityMetricsConsumer } from './activity-metrics-consumer.js';
+import { getActivityEventTaxonomy } from './event-taxonomy.js';
 
 // Create Fastify instance
 const app = Fastify({
@@ -86,6 +92,29 @@ function validateSecrets() {
 
 // Register plugins
 async function registerPlugins() {
+    // Load OpenAPI specification
+    const openApiPath = new URL('../openapi.yaml', import.meta.url);
+    const openApiContent = readFileSync(openApiPath, 'utf-8');
+    const openApiSpec = parseYaml(openApiContent);
+
+    // Register Swagger
+    await app.register(swagger, {
+        mode: 'static',
+        specification: {
+            document: openApiSpec,
+        },
+    });
+
+    // Register Swagger UI
+    await app.register(swaggerUi, {
+        routePrefix: '/documentation',
+        uiConfig: {
+            docExpansion: 'list',
+            deepLinking: true,
+        },
+        staticCSP: true,
+    });
+
     await app.register(cors, {
         origin: config.corsOrigin,
     });
@@ -333,6 +362,121 @@ app.post('/api/libraries/:id/rescan', async (request, reply) => {
         app.log.error(error, 'Failed to rescan library');
         reply.status(500);
         return { error: 'Failed to rescan library' };
+    }
+});
+
+// Activity Metrics API
+app.get('/api/metrics/activity', { preHandler: requireRole('user', 'admin') }, async (request, reply) => {
+    const { user_id, days = '7' } = request.query as { user_id?: string; days?: string };
+    const user = (request as any).user as UserSession;
+
+    // Users can only view their own metrics unless they're admin
+    const targetUserId = user.roles.includes('admin') && user_id ? user_id : user.user_id;
+    const daysToFetch = Math.min(parseInt(days), 90); // Max 90 days
+
+    try {
+        const redis = getRedisClient();
+        const metricsData: Array<{
+            date: string;
+            activity: Record<string, number>;
+            errors: Record<string, number>;
+            runs: Record<string, number>;
+        }> = [];
+
+        // Fetch last N days of metrics
+        for (let i = 0; i < daysToFetch; i++) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dateKey = date.toISOString().split('T')[0] ?? '';
+
+            const activityKey = `metrics:activity:user:${targetUserId}:daily:${dateKey}`;
+            const errorsKey = `metrics:errors:user:${targetUserId}:daily:${dateKey}`;
+            const runsKey = `metrics:runs:user:${targetUserId}:daily:${dateKey}`;
+
+            const [activity, errors, runs] = await Promise.all([
+                redis.hgetall(activityKey),
+                redis.hgetall(errorsKey),
+                redis.hgetall(runsKey),
+            ]);
+
+            // Convert string values to numbers
+            const activityCounts: Record<string, number> = {};
+            const errorCounts: Record<string, number> = {};
+            const runCounts: Record<string, number> = {};
+
+            for (const [key, value] of Object.entries(activity)) {
+                activityCounts[key] = parseInt(value) || 0;
+            }
+            for (const [key, value] of Object.entries(errors)) {
+                errorCounts[key] = parseInt(value) || 0;
+            }
+            for (const [key, value] of Object.entries(runs)) {
+                runCounts[key] = parseInt(value) || 0;
+            }
+
+            metricsData.push({
+                date: dateKey,
+                activity: activityCounts,
+                errors: errorCounts,
+                runs: runCounts,
+            });
+        }
+
+        return {
+            user_id: targetUserId,
+            days: metricsData.reverse(), // Oldest first
+        };
+    } catch (error) {
+        app.log.error(error, 'Failed to fetch activity metrics');
+        reply.status(500);
+        return { error: 'Failed to fetch activity metrics' };
+    }
+});
+
+app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, async (request, reply) => {
+    const user = (request as any).user as UserSession;
+    const { user_id } = request.query as { user_id?: string };
+    const targetUserId = user.roles.includes('admin') && user_id ? user_id : user.user_id;
+
+    try {
+        const redis = getRedisClient();
+        const today = new Date().toISOString().split('T')[0] ?? '';
+
+        const activityKey = `metrics:activity:user:${targetUserId}:daily:${today}`;
+        const errorsKey = `metrics:errors:user:${targetUserId}:daily:${today}`;
+        const runsKey = `metrics:runs:user:${targetUserId}:daily:${today}`;
+
+        const [activity, errors, runs] = await Promise.all([
+            redis.hgetall(activityKey),
+            redis.hgetall(errorsKey),
+            redis.hgetall(runsKey),
+        ]);
+
+        // Calculate totals
+        const totalActivity = Object.values(activity).reduce((sum, val) => sum + (parseInt(val) || 0), 0);
+        const totalErrors = Object.values(errors).reduce((sum, val) => sum + (parseInt(val) || 0), 0);
+        const totalRuns = Object.values(runs).reduce((sum, val) => sum + (parseInt(val) || 0), 0);
+
+        return {
+            user_id: targetUserId,
+            date: today,
+            total_events: totalActivity,
+            total_errors: totalErrors,
+            total_runs: totalRuns,
+            error_rate: totalActivity > 0 ? (totalErrors / totalActivity) * 100 : 0,
+            top_events: Object.entries(activity)
+                .map(([event, count]) => ({
+                    event,
+                    count: parseInt(count) || 0,
+                    taxonomy: getActivityEventTaxonomy(event as any),
+                }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 10),
+        };
+    } catch (error) {
+        app.log.error(error, 'Failed to fetch metrics summary');
+        reply.status(500);
+        return { error: 'Failed to fetch metrics summary' };
     }
 });
 

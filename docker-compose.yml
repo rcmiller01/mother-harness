@@ -33,7 +33,14 @@ services:
       - "8000:8000"
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-mother_dev_password}@redis-stack:6379
+      - REDIS_URL=redis://orchestrator:${REDIS_ACL_ORCHESTRATOR_PASSWORD:-mother_dev_password}@redis-stack:6379
+      - REDIS_USERNAME=orchestrator
+      - REDIS_PASSWORD=${REDIS_ACL_ORCHESTRATOR_PASSWORD:-mother_dev_password}
+      - JWT_SECRET=${JWT_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_ALLOWED_DOMAINS=${GOOGLE_ALLOWED_DOMAINS}
+      - GOOGLE_ADMIN_EMAILS=${GOOGLE_ADMIN_EMAILS}
+      - GOOGLE_APPROVER_EMAILS=${GOOGLE_APPROVER_EMAILS}
       - OLLAMA_LOCAL_URL=${OLLAMA_LOCAL_URL:-http://core2:11434}
       - OLLAMA_CLOUD_API_KEY=${OLLAMA_CLOUD_API_KEY}
       - N8N_URL=${N8N_URL:-http://n8n:5678}
@@ -48,16 +55,27 @@ services:
         limits:
           memory: 8G
           cpus: '4'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   docling:
     build:
       context: .
       dockerfile: ./services/docling/Dockerfile
     container_name: mother-docling
+    ports:
+      - "8080:8080"
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-mother_dev_password}@redis-stack:6379
+      - REDIS_URL=redis://docling:${REDIS_ACL_DOCLING_PASSWORD:-mother_dev_password}@redis-stack:6379
+      - REDIS_USERNAME=docling
+      - REDIS_PASSWORD=${REDIS_ACL_DOCLING_PASSWORD:-mother_dev_password}
       - DOCLING_API_URL=${DOCLING_API_URL:-http://localhost:8000}
       - STORAGE_PATH=/mnt/libraries
+      - HEALTH_PORT=8080
     volumes:
       - type: bind
         source: ${LIBRARIES_PATH:-/core4/libraries}
@@ -72,6 +90,12 @@ services:
         limits:
           memory: 16G
           cpus: '8'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   n8n:
     image: n8nio/n8n:latest
@@ -108,10 +132,20 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://orchestrator:8000
       - NEXT_PUBLIC_WS_URL=ws://orchestrator:8000
+      - REDIS_URL=redis://dashboard:${REDIS_ACL_DASHBOARD_PASSWORD:-mother_dev_password}@redis-stack:6379
+      - REDIS_USERNAME=dashboard
+      - REDIS_PASSWORD=${REDIS_ACL_DASHBOARD_PASSWORD:-mother_dev_password}
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy
     networks:
       - mother_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 networks:
   mother_net:
