@@ -8,7 +8,7 @@ This checklist is the authoritative source for launch readiness status.
 - [ ] Core orchestration flows complete (plan → execute → review → finalize) - *Partially implemented, needs end-to-end validation*
 - [ ] Primary agent roster wired and reachable (Orchestrator, Researcher, Coder, Analyst, Critic) - *Local execution implemented, n8n workflows optional*
 - [x] Approval gating implemented for risky actions - *Completed: Enhanced approval service with risk assessment*
-- [ ] Artifact lifecycle retention policy defined
+- [x] Artifact lifecycle retention policy defined - *Completed: Default policies in services/shared/src/robustness/gc.ts*
 - [ ] Validation checklist items mapped to owners
 
 ## Infrastructure & Data
@@ -50,9 +50,9 @@ This checklist is the authoritative source for launch readiness status.
 
 ## Progress Summary
 
-**Completed:** 21/30 items (70%)
+**Completed:** 22/30 items (73%)
 **In Progress:** 1/30 items (3%)
-**Remaining:** 8/30 items (27%)
+**Remaining:** 7/30 items (23%)
 
 ### Ready for Limited Testing
 The following items are sufficient for controlled testing in a development/staging environment:
@@ -74,7 +74,6 @@ The following critical items were completed on December 22, 2024:
 ### Remaining Before Production
 The following items still require attention:
 - ⚠️ Core orchestration end-to-end validation
-- ⚠️ Artifact lifecycle retention policy
 - ⚠️ Replay functionality validation
 - ⚠️ Regression checklist on staging
 - ⚠️ Environment validation for physical hardware
