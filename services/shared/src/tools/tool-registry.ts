@@ -3,7 +3,7 @@
  * Manages deterministic tools that execute before LLM calls
  */
 
-import { getRedisJSON } from '@mother-harness/shared';
+import { getRedisJSON } from '../redis/index.js';
 import { nanoid } from 'nanoid';
 
 /** Tool input/output parameter definition */

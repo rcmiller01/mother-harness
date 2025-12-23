@@ -90,6 +90,14 @@ export class ToolsmithAgent extends BaseAgent {
             success: validation.valid,
             outputs: {
                 tool: design.tool,
+                tool_definition: {
+                    name: design.tool.name,
+                    description: design.tool.description,
+                    parameters: design.tool.parameters,
+                    return_type: design.tool.return_type,
+                    examples: design.tool.examples,
+                },
+                tool_code: design.tool.implementation,
                 validation: validation,
                 registered: validation.valid,
             },

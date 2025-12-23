@@ -1,5 +1,10 @@
 # Launch Review - December 22, 2024
 
+## Addendum - December 22, 2025
+
+- ✅ Core orchestration flows are now validated via passing orchestrator integration tests (flow + local fallback).
+- ✅ Replay/timeline is now validated via per-run activity streams and a replay retrieval endpoint (`GET /api/runs/:id/replay`) backed by an integration test.
+
 ## Executive Summary
 
 **Review Date:** December 22, 2024

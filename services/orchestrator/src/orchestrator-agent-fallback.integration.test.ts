@@ -5,21 +5,68 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock Redis and dependencies
-const redisStore = new Map<string, unknown>();
+const redisStore = new Map<string, Record<string, unknown>>();
+
+const getByPath = (value: Record<string, unknown>, path: string): unknown => {
+    if (path === '$') return value;
+    const pathParts = path.replace('$.', '').split('.');
+    return pathParts.reduce<unknown>((acc, part) => {
+        if (acc && typeof acc === 'object' && part in (acc as Record<string, unknown>)) {
+            return (acc as Record<string, unknown>)[part];
+        }
+        return undefined;
+    }, value);
+};
+
+const setByPath = (value: Record<string, unknown>, path: string, next: unknown): void => {
+    if (path === '$') {
+        Object.assign(value, next as Record<string, unknown>);
+        return;
+    }
+    const pathParts = path.replace('$.', '').split('.');
+    let target = value;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+        const part = pathParts[i]!;
+        if (!target[part] || typeof target[part] !== 'object') {
+            target[part] = {};
+        }
+        target = target[part] as Record<string, unknown>;
+    }
+    target[pathParts[pathParts.length - 1]!] = next;
+};
 
 vi.mock('@mother-harness/shared', async () => {
     const actual = await vi.importActual('@mother-harness/shared');
     return {
         ...actual,
         getRedisJSON: () => ({
-            get: async (key: string) => redisStore.get(key),
+            get: async <T>(key: string, path: string = '$') => {
+                const value = redisStore.get(key);
+                if (!value) return null;
+                return (getByPath(value, path) as T) ?? null;
+            },
             set: async (key: string, path: string, value: unknown) => {
-                redisStore.set(key, value);
+                const current = redisStore.get(key) ?? {};
+                setByPath(current, path, value);
+                redisStore.set(key, current);
+            },
+            del: async (key: string) => {
+                const existed = redisStore.has(key);
+                redisStore.delete(key);
+                return existed ? 1 : 0;
             },
             keys: async (pattern: string) => {
                 const allKeys = Array.from(redisStore.keys());
                 const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
                 return allKeys.filter(key => regex.test(key));
+            },
+            arrAppend: async (key: string, path: string, ...values: unknown[]) => {
+                const current = redisStore.get(key) ?? {};
+                const existing = getByPath(current, path);
+                const next = Array.isArray(existing) ? [...existing, ...values] : [...values];
+                setByPath(current, path, next);
+                redisStore.set(key, current);
+                return next.length;
             },
         }),
         getRedisClient: () => ({
@@ -28,11 +75,17 @@ vi.mock('@mother-harness/shared', async () => {
         }),
         getLLMClient: () => ({
             chat: vi.fn(),
+            embed: vi.fn(async () => ({
+                embeddings: [new Array(768).fill(0)],
+                model: 'test',
+                dimensions: 768,
+            })),
         }),
         getRoleRegistry: () => ({
             getContract: vi.fn(async () => ({
                 role: 'test',
                 description: 'test',
+                default_action: 'rag_retrieval',
                 required_inputs: [],
                 optional_inputs: [],
                 required_outputs: [],
@@ -45,14 +98,39 @@ vi.mock('@mother-harness/shared', async () => {
         }),
         getContractEnforcer: () => ({
             validateInputAllowlist: vi.fn(async () => ({ valid: true, errors: [] })),
+            validateAllowlist: vi.fn(async () => ({ valid: true, errors: [] })),
             validateRequiredArtifacts: vi.fn(async () => ({ valid: true, errors: [] })),
             validateOutputs: vi.fn(async () => ({ valid: true, errors: [] })),
+        }),
+        getResourceBudgetGuard: () => ({
+            checkAllScopes: vi.fn(async () => ({ allowed: true, remaining: 9999 })),
+            recordUsageAllScopes: vi.fn(async () => undefined),
         }),
     };
 });
 
-vi.mock('@mother-harness/agents', () => ({
-    createAgent: (agentType: string) => ({
+// Keep these tests focused on fallback behavior, not approval gating.
+vi.mock('./approval-service.js', async () => {
+    const actual = await vi.importActual<typeof import('./approval-service.js')>('./approval-service.js');
+    return {
+        ...actual,
+        getApprovalService: () => ({
+            shouldRequireApproval: () => ({
+                required: false,
+                assessment: {
+                    level: 'low',
+                    factors: [],
+                    requires_manual_approval: false,
+                    auto_approvable: true,
+                },
+            }),
+        }),
+    };
+});
+
+function agentsMockFactory() {
+    return {
+    createAgent: (_agentType: string) => ({
         execute: vi.fn(async () => ({
             result: {
                 answer: 'Test result from local agent',
@@ -65,7 +143,12 @@ vi.mock('@mother-harness/agents', () => ({
             model_used: 'local-model',
         })),
     }),
-}));
+    };
+}
+
+// Mock both the package specifier and the aliased source path.
+vi.mock('@mother-harness/agents', agentsMockFactory);
+vi.mock('../../agents/src/index.ts', agentsMockFactory);
 
 import { Orchestrator, clearAgentExecutors, hasAgentExecutor } from './orchestrator.js';
 
@@ -158,6 +241,7 @@ describe('Orchestrator local agent fallback', () => {
         const fetchMock = vi.fn(async () => ({
             ok: false,
             status: 503,
+            text: async () => 'Service unavailable',
         }));
         vi.stubGlobal('fetch', fetchMock);
 
@@ -172,6 +256,23 @@ describe('Orchestrator local agent fallback', () => {
                 'user-test',
                 `Test ${agentType} local execution`
             );
+
+            // Override the planner-generated steps so this test stays focused on
+            // local fallback behavior and avoids approval-gated steps (e.g. coder).
+            const storedTask = redisStore.get(`task:${task.id}`);
+            if (storedTask) {
+                storedTask.todo_list = [
+                    {
+                        id: 'step-1',
+                        description: `Local execution for ${agentType}`,
+                        agent: agentType,
+                        status: 'pending',
+                        depends_on: [],
+                    },
+                ];
+                storedTask.steps_completed = [];
+                storedTask.status = 'planning';
+            }
 
             await orchestrator.executeTask(task.id);
 

@@ -3,7 +3,7 @@
  * Scheduled and recurring task execution
  */
 
-import { getRedisClient, getRedisJSON } from '@mother-harness/shared';
+import { getRedisClient, getRedisJSON } from '../redis/index.js';
 import { nanoid } from 'nanoid';
 
 /** Schedule types */

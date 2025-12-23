@@ -3,8 +3,10 @@
  * Manages agent role definitions in Redis
  */
 
-import type { AgentType, AgentContract, RoleRegistryEntry } from '@mother-harness/shared';
-import { getRedisJSON } from '@mother-harness/shared';
+import type { AgentType } from '../types/agent.js';
+import type { AgentContract } from '../types/contract.js';
+import type { RoleRegistryEntry } from '../types/registry.js';
+import { getRedisJSON } from '../redis/index.js';
 import { type RoleDefinition, DEFAULT_ROLES } from '../types/role.js';
 import { DEFAULT_AGENT_CONTRACTS } from '../types/contract.js';
 

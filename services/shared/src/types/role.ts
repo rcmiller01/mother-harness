@@ -3,7 +3,8 @@
  * Complete agent role definitions with capabilities and constraints
  */
 
-import type { AgentType, RiskLevel, ApprovalType } from '@mother-harness/shared';
+import type { AgentType } from './agent.js';
+import type { RiskLevel, ApprovalType } from './task.js';
 
 /** Capability that an agent may have */
 export type AgentCapability =
@@ -89,7 +90,7 @@ export const DEFAULT_ROLES: Record<AgentType, RoleDefinition> = {
         type: 'researcher',
         name: 'Researcher',
         description: 'Conducts web research, synthesizes findings with citations',
-        capabilities: ['web_search', 'rag_retrieval'],
+        capabilities: ['rag_retrieval'],
         max_tokens_per_call: 8000,
         max_retries: 3,
         timeout_ms: 120000,
@@ -99,7 +100,7 @@ export const DEFAULT_ROLES: Record<AgentType, RoleDefinition> = {
         preferred_local_model: 'gpt-oss:20b',
         preferred_cloud_model: 'qwen3-next:80b-cloud',
         requires_vision: false,
-        requires_tool_calling: true,
+        requires_tool_calling: false,
         version: '1.0.0',
         enabled: true,
     },
@@ -165,7 +166,7 @@ export const DEFAULT_ROLES: Record<AgentType, RoleDefinition> = {
         type: 'analyst',
         name: 'Analyst',
         description: 'Analyzes data, generates reports and visualizations',
-        capabilities: ['database_read', 'code_execution', 'rag_retrieval'],
+        capabilities: ['rag_retrieval'],
         max_tokens_per_call: 8000,
         max_retries: 3,
         timeout_ms: 180000,
@@ -182,7 +183,7 @@ export const DEFAULT_ROLES: Record<AgentType, RoleDefinition> = {
         preferred_local_model: 'gpt-oss:20b',
         preferred_cloud_model: 'qwen3-coder:30b-cloud',
         requires_vision: false,
-        requires_tool_calling: true,
+        requires_tool_calling: false,
         version: '1.0.0',
         enabled: true,
     },
@@ -286,7 +287,7 @@ export const DEFAULT_ROLES: Record<AgentType, RoleDefinition> = {
         type: 'update',
         name: 'Update Agent',
         description: 'Tracks software inventory, recommends updates, assesses impact',
-        capabilities: ['web_search', 'rag_retrieval', 'api_calls'],
+        capabilities: ['rag_retrieval'],
         max_tokens_per_call: 8000,
         max_retries: 3,
         timeout_ms: 180000,
@@ -296,7 +297,7 @@ export const DEFAULT_ROLES: Record<AgentType, RoleDefinition> = {
         preferred_local_model: 'gpt-oss:20b',
         preferred_cloud_model: 'gpt-oss:120b-cloud',
         requires_vision: false,
-        requires_tool_calling: true,
+        requires_tool_calling: false,
         version: '1.0.0',
         enabled: true,
     },

@@ -3,7 +3,7 @@
  * Enforces resource limits per-run, per-user, and globally
  */
 
-import { getRedisClient } from '@mother-harness/shared';
+import { getRedisClient } from '../redis/index.js';
 import type {
     BudgetScope,
     ResourceType,

@@ -3,7 +3,7 @@
  * Reusable prompt templates with variables
  */
 
-import { getRedisJSON } from '@mother-harness/shared';
+import { getRedisJSON } from '../redis/index.js';
 import { nanoid } from 'nanoid';
 
 /** Template variable */

@@ -18,6 +18,7 @@ import {
     createProject,
     createLibrary,
     getRedisJSON,
+    getResourceBudgetGuard,
     getContractEnforcer,
     getRoleRegistry,
     TaskSchema,
@@ -30,10 +31,11 @@ import {
 } from '@mother-harness/shared';
 import { createAgent, type AgentContext as AgentExecutionContext } from '@mother-harness/agents';
 import { TaskPlanner } from './planner.js';
+import { N8nAdapter } from './n8n-adapter.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
 import { Tier2Memory } from './memory/tier2-summaries.js';
 import { Tier3Memory } from './memory/tier3-longterm.js';
-import { logActivity } from './activity-stream.js';
+import { listRunActivityEvents, logActivity } from './activity-stream.js';
 import { getCostTracker } from './cost-tracker.js';
 import { getApprovalService } from './approval-service.js';
 
@@ -128,11 +130,20 @@ export function hasAgentExecutor(agentType: AgentType): boolean {
 export class Orchestrator {
     private redis = getRedisJSON();
     private planner = new TaskPlanner();
+    private n8nAdapter = new N8nAdapter();
     private tier1 = new Tier1Memory();
     private tier2 = new Tier2Memory();
     private tier3 = new Tier3Memory();
     private enforcer = getContractEnforcer();
     private registry = getRoleRegistry();
+    private budgetGuard = getResourceBudgetGuard();
+    private costTracker = getCostTracker();
+
+    private getModelUsed(result: AgentResult): string | undefined {
+        return typeof result.model_used === 'string' && result.model_used.length > 0
+            ? result.model_used
+            : undefined;
+    }
 
     /**
      * Create a run with a new task
@@ -283,6 +294,26 @@ export class Orchestrator {
         const task = await this.getTask(run.task_id);
         if (!task) return null;
         return task.artifacts;
+    }
+
+    /**
+     * Fetch a replay/timeline view for a run.
+     * Read-only: does not mutate run/task state.
+     */
+    async getRunReplay(
+        runId: string,
+        options: { limit?: number; direction?: 'forward' | 'backward' } = {}
+    ): Promise<{
+        run: Run;
+        task: Task;
+        events: Awaited<ReturnType<typeof listRunActivityEvents>>;
+    } | null> {
+        const run = await this.getRun(runId);
+        if (!run) return null;
+        const task = await this.getTask(run.task_id);
+        if (!task) return null;
+        const events = await listRunActivityEvents(runId, options);
+        return { run, task, events };
     }
 
     /**
@@ -578,6 +609,11 @@ export class Orchestrator {
                 // Update step with result
                 await this.updateStepResult(taskId, step.id, result);
 
+                // Keep the in-memory copy in sync so dependency checks work.
+                if (!task.steps_completed.includes(step.id)) {
+                    task.steps_completed.push(step.id);
+                }
+
                 // Check if approval is needed based on the result
                 const approvalService = getApprovalService();
                 const approvalCheck = approvalService.shouldRequireApproval(step, task, result);
@@ -709,12 +745,25 @@ export class Orchestrator {
         );
 
         if (workflowResult.success) {
-            return this.normalizeWorkflowResult(step, workflowResult);
+            const normalized = this.normalizeWorkflowResult(step, workflowResult);
+            // If the workflow ran but reported failure in its payload, treat it as a failure
+            // so we fall back to direct/local execution.
+            if (normalized.success) {
+                return normalized;
+            }
+
+            workflowResult.success = false;
+            workflowResult.error = {
+                type: 'execution',
+                message: 'Workflow reported success=false',
+                details: workflowResult.data,
+            };
         }
 
         // Execute the agent directly
+        const directExecutor = agentExecutors.get(step.agent) ?? getLocalAgentExecutor(step.agent);
         const startTime = Date.now();
-        const result = await executor(step.description, context);
+        const result = await directExecutor(step.description, context);
         result.duration_ms = Date.now() - startTime;
         result.outputs = {
             ...(result.outputs ?? {}),

@@ -3,7 +3,7 @@
  * Context-aware agent behavior modification
  */
 
-import { getRedisJSON } from '@mother-harness/shared';
+import { getRedisJSON } from '../redis/index.js';
 import { nanoid } from 'nanoid';
 
 /** Focus mode definition */

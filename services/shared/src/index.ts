@@ -38,3 +38,6 @@ export * from './scheduler/index.js';
 
 // LLM Client
 export * from './llm/index.js';
+
+// Review output normalization (critic/skeptic)
+export * from './reviews/index.js';

@@ -3,7 +3,7 @@
  * Graph-based note storage with bidirectional links
  */
 
-import { getRedisJSON, getRedisClient } from '@mother-harness/shared';
+import { getRedisJSON, getRedisClient } from '../redis/index.js';
 import { nanoid } from 'nanoid';
 
 /** PKM Note */

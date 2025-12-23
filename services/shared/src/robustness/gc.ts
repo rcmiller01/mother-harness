@@ -3,7 +3,7 @@
  * Manages artifact lifecycle and cleanup
  */
 
-import { getRedisClient, getRedisJSON } from '@mother-harness/shared';
+import { getRedisClient, getRedisJSON } from '../redis/index.js';
 
 /** Artifact retention policy */
 export interface ArtifactRetention {

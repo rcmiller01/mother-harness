@@ -24,7 +24,7 @@ export const DEFAULT_AGENT_CONTRACTS: Record<AgentType, AgentContract> = {
     researcher: {
         agent: 'researcher',
         action_allowlist: ['web_search', 'rag_retrieval'],
-        default_action: 'web_search',
+        default_action: 'rag_retrieval',
         required_artifacts: [],
     },
     coder: {
@@ -42,7 +42,7 @@ export const DEFAULT_AGENT_CONTRACTS: Record<AgentType, AgentContract> = {
     analyst: {
         agent: 'analyst',
         action_allowlist: ['database_read', 'code_execution', 'rag_retrieval'],
-        default_action: 'database_read',
+        default_action: 'rag_retrieval',
         required_artifacts: [],
     },
     critic: {
@@ -78,7 +78,7 @@ export const DEFAULT_AGENT_CONTRACTS: Record<AgentType, AgentContract> = {
     update: {
         agent: 'update',
         action_allowlist: ['web_search', 'rag_retrieval', 'api_calls'],
-        default_action: 'web_search',
+        default_action: 'rag_retrieval',
         required_artifacts: [],
     },
     toolsmith: {

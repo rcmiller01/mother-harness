@@ -76,7 +76,20 @@ export class UpdateAgent extends BaseAgent {
         if (inventory.items.length === 0) {
             return {
                 success: true,
-                outputs: { message: 'No software items found to check' },
+                outputs: {
+                    update_recommendations: [],
+                    inventory: [],
+                    recommendations: [],
+                    summary: {
+                        total_items: 0,
+                        updates_available: 0,
+                        critical_updates: 0,
+                        security_updates: 0,
+                        breaking_updates: 0,
+                    },
+                    priority_updates: [],
+                    message: 'No software items found to check',
+                },
                 explanation: 'No items in inventory',
                 tokens_used: totalTokens,
                 duration_ms: Date.now() - startTime,
@@ -92,11 +105,16 @@ export class UpdateAgent extends BaseAgent {
         const security = updates.recommendations.filter(u => u.security_related);
         const breaking = updates.recommendations.filter(u => u.breaking_changes);
 
+        const migrationSteps = updates.recommendations
+            .flatMap(u => u.migration_notes)
+            .filter((note, idx, arr) => arr.indexOf(note) === idx);
+
         return {
             success: true,
             outputs: {
                 inventory: inventory.items,
                 recommendations: updates.recommendations,
+                update_recommendations: updates.recommendations,
                 summary: {
                     total_items: inventory.items.length,
                     updates_available: updates.recommendations.length,
@@ -107,6 +125,13 @@ export class UpdateAgent extends BaseAgent {
                 priority_updates: critical.concat(
                     security.filter(s => !critical.includes(s))
                 ),
+                breaking_changes: breaking.map(b => ({
+                    name: b.item.name,
+                    current_version: b.item.current_version,
+                    latest_version: b.latest_version,
+                    summary: b.summary,
+                })),
+                migration_steps: migrationSteps,
             },
             explanation: `Found ${updates.recommendations.length} updates (${critical.length} critical, ${security.length} security-related)`,
             tokens_used: totalTokens,

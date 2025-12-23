@@ -234,6 +234,30 @@ app.get('/api/runs/:id/artifacts', async (request, reply) => {
     }
 });
 
+app.get('/api/runs/:id/replay', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { limit, direction } = request.query as { limit?: string; direction?: 'forward' | 'backward' };
+
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    const safeLimit = typeof parsedLimit === 'number' && Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+
+    try {
+        const replay = await orchestrator.getRunReplay(id, {
+            limit: safeLimit,
+            direction,
+        });
+        if (!replay) {
+            reply.status(404);
+            return { error: 'Run not found' };
+        }
+        return replay;
+    } catch (error) {
+        app.log.error(error, 'Failed to get run replay');
+        reply.status(500);
+        return { error: 'Failed to get run replay' };
+    }
+});
+
 app.get('/api/artifacts/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
 

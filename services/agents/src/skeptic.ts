@@ -7,16 +7,31 @@ import type { AgentType } from '@mother-harness/shared';
 import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
-/** Concern severity */
+/** Legacy concern severity (kept for backward compatibility) */
 type ConcernLevel = 'critical' | 'significant' | 'minor' | 'consideration';
 
-/** Identified concern */
-interface Concern {
-    level: ConcernLevel;
+/** Normalized severity levels (shared vocabulary with critic outputs) */
+type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+/** Concern shape returned by the LLM (legacy + optional normalized fields) */
+interface RawConcern {
+    level?: ConcernLevel;
+    severity?: Severity;
     area: string;
     issue: string;
     potential_impact: string;
     mitigation?: string;
+    recommendation?: string;
+}
+
+/** Identified concern (normalized for chaining) */
+interface Concern extends RawConcern {
+    /** Normalized severity; always present */
+    severity: Severity;
+    /** Normalized alias for chaining across review agents */
+    description: string;
+    /** Normalized alias for chaining across review agents */
+    recommendation?: string;
 }
 
 /** Alternative approach */
@@ -46,11 +61,13 @@ Return a JSON object:
   "overall_assessment": "brief assessment of the proposal's soundness",
   "concerns": [
     {
-      "level": "critical" | "significant" | "minor" | "consideration",
+            "severity": "critical" | "high" | "medium" | "low" | "info",
+            "level": "critical" | "significant" | "minor" | "consideration" (optional legacy field),
       "area": "which aspect (technical, business, security, etc.)",
       "issue": "what the concern is",
       "potential_impact": "what could go wrong",
-      "mitigation": "how to address it"
+            "mitigation": "how to address it" (legacy field name),
+            "recommendation": "how to address it" (preferred field name)
     }
   ],
   "blind_spots": ["assumptions or areas not considered"],
@@ -77,8 +94,8 @@ export class SkepticAgent extends BaseAgent {
 
         const critique = await this.analyzeProposal(inputs, context);
 
-        const criticalCount = critique.concerns.filter(c => c.level === 'critical').length;
-        const significantCount = critique.concerns.filter(c => c.level === 'significant').length;
+        const criticalCount = critique.concerns.filter(c => c.severity === 'critical').length;
+        const significantCount = critique.concerns.filter(c => c.level === 'significant' || c.severity === 'high').length;
         const challenges = critique.concerns.reduce<Record<string, Concern[]>>((grouped, concern) => {
             const area = concern.area || 'general';
             if (!grouped[area]) {
@@ -127,7 +144,7 @@ export class SkepticAgent extends BaseAgent {
 
         const result = await this.llm.json<{
             overall_assessment: string;
-            concerns: Concern[];
+            concerns: RawConcern[];
             blind_spots: string[];
             edge_cases: string[];
             alternatives: Alternative[];
@@ -141,8 +158,19 @@ export class SkepticAgent extends BaseAgent {
         });
 
         if (result.data) {
+            const normalizedConcerns: Concern[] = (result.data.concerns || []).map((c): Concern => {
+                const severity = c.severity ?? mapLegacyLevelToSeverity(c.level);
+                return {
+                    ...c,
+                    severity,
+                    description: c.issue,
+                    recommendation: c.recommendation ?? c.mitigation,
+                };
+            });
+
             return {
                 ...result.data,
+                concerns: normalizedConcerns,
                 tokens: result.raw.tokens_used.total,
             };
         }
@@ -158,5 +186,20 @@ export class SkepticAgent extends BaseAgent {
             verdict_rationale: 'Critique could not be completed due to processing error.',
             tokens: result.raw.tokens_used.total,
         };
+    }
+}
+
+function mapLegacyLevelToSeverity(level?: ConcernLevel): Severity {
+    switch (level) {
+        case 'critical':
+            return 'critical';
+        case 'significant':
+            return 'high';
+        case 'minor':
+            return 'low';
+        case 'consideration':
+            return 'info';
+        default:
+            return 'info';
     }
 }

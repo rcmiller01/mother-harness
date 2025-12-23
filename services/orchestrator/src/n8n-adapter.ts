@@ -53,7 +53,7 @@ export class N8nAdapter {
     ): Promise<WorkflowResult> {
         const startTime = Date.now();
         const timeout = options.timeout ?? this.defaultTimeout;
-        const maxRetries = options.retries ?? this.defaultRetries;
+        const maxRetries = options.retries ?? (options.fallback_to_direct ? 0 : this.defaultRetries);
         const pollInterval = options.poll_interval_ms ?? this.defaultPollInterval;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {

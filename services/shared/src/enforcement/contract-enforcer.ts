@@ -3,8 +3,11 @@
  * Validates agent actions against role contracts
  */
 
-import type { AgentType, Task, TodoItem, Approval } from '@mother-harness/shared';
-import { createApproval, getRedisJSON } from '@mother-harness/shared';
+import type { AgentType } from '../types/agent.js';
+import type { Task, TodoItem } from '../types/task.js';
+import type { Approval } from '../types/approval.js';
+import { createApproval } from '../types/approval.js';
+import { getRedisJSON } from '../redis/index.js';
 import { RoleRegistry, getRoleRegistry } from '../registry/role-registry.js';
 import { type RoleDefinition, type AgentCapability } from '../types/role.js';
 import { nanoid } from 'nanoid';

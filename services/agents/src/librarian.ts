@@ -70,9 +70,21 @@ export class LibrarianAgent extends BaseAgent {
         const result = await this.executeCommand(command, context);
         totalTokens += result.tokens;
 
+        const ingestionReport = {
+            command: command.command,
+            success: result.success,
+            message: result.message,
+            library: command.library_name ?? context.library_ids?.[0] ?? 'default',
+            document_count: Array.isArray(command.documents) ? command.documents.length : 0,
+            timestamp: new Date().toISOString(),
+        };
+
         return {
             success: result.success,
-            outputs: result.data,
+            outputs: {
+                ...result.data,
+                ingestion_report: ingestionReport,
+            },
             explanation: result.message,
             tokens_used: totalTokens,
             duration_ms: Date.now() - startTime,

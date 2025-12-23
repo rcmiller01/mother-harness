@@ -14,9 +14,13 @@ type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 interface ReviewIssue {
     severity: Severity;
     category: 'security' | 'performance' | 'correctness' | 'style' | 'documentation';
+    /** Normalized alias for chaining across review agents */
+    area?: string;
     location?: string;
     description: string;
     suggestion: string;
+    /** Normalized alias for chaining across review agents */
+    recommendation?: string;
 }
 
 /** Review result */
@@ -88,6 +92,12 @@ export class CriticAgent extends BaseAgent {
         const highCount = reviewResult.issues.filter(i => i.severity === 'high').length;
         const totalCount = reviewResult.issues.length;
 
+        const issues = reviewResult.issues.map(issue => ({
+            ...issue,
+            area: issue.area ?? issue.category,
+            recommendation: issue.recommendation ?? issue.suggestion,
+        }));
+
         return {
             success: true,
             outputs: {
@@ -101,10 +111,10 @@ export class CriticAgent extends BaseAgent {
                         total: totalCount,
                     },
                 },
-                issues_found: reviewResult.issues,
+                issues_found: issues,
                 approval: reviewResult.approval,
                 summary: reviewResult.summary,
-                issues: reviewResult.issues,
+                issues,
                 positive_notes: reviewResult.positive_notes,
                 critical_issues: criticalCount,
                 high_issues: highCount,
@@ -161,7 +171,11 @@ export class CriticAgent extends BaseAgent {
             return {
                 approval: result.data.approval,
                 summary: result.data.summary,
-                issues: result.data.issues || [],
+                issues: (result.data.issues || []).map(issue => ({
+                    ...issue,
+                    area: issue.area ?? issue.category,
+                    recommendation: issue.recommendation ?? issue.suggestion,
+                })),
                 positive_notes: result.data.positive_notes || [],
                 tokens: result.raw.tokens_used.total,
             };
@@ -175,8 +189,10 @@ export class CriticAgent extends BaseAgent {
             issues: [{
                 severity: 'info',
                 category: 'documentation',
+                area: 'documentation',
                 description: 'Automated review failed',
                 suggestion: 'Please retry or conduct manual review',
+                recommendation: 'Please retry or conduct manual review',
             }],
             positive_notes: [],
             tokens: result.raw.tokens_used.total,

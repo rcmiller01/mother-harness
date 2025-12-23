@@ -3,7 +3,7 @@
  * Track important decisions with context, reasoning, and outcomes
  */
 
-import { getRedisJSON } from '@mother-harness/shared';
+import { getRedisJSON } from '../redis/index.js';
 import { nanoid } from 'nanoid';
 
 /** Decision status */
