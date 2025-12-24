@@ -54,7 +54,7 @@ export class CostTracker {
             return;
         }
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0] ?? '';
         const month = today.substring(0, 7);
 
         // Increment daily spend
@@ -81,7 +81,7 @@ export class CostTracker {
      * Get current budget status for a user
      */
     async getBudgetStatus(userId: string): Promise<BudgetStatus> {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0] ?? '';
         const month = today.substring(0, 7);
 
         const dailySpend = await this.getSpend(userId, 'daily', today);
@@ -134,7 +134,7 @@ export class CostTracker {
         monthly: Record<string, number>;
         by_model: Record<string, number>;
     }> {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0] ?? '';
         const month = today.substring(0, 7);
 
         const dailyKey = `cost:${userId}:daily:${today}`;

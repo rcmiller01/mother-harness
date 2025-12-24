@@ -105,7 +105,7 @@ export class FocusModeManager {
             user_id: userId,
             focus_mode_id: modeId,
             started_at: now.toISOString(),
-            ends_at: endsAt,
+            ...(endsAt !== undefined && { ends_at: endsAt }),
             active: true,
         };
 

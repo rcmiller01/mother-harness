@@ -69,25 +69,38 @@ export function createLogger(context: {
     agent?: string;
 } = {}) {
     return {
-        debug: (message: string, data?: Record<string, unknown>) =>
-            log('debug', message, { ...context, data }),
+        debug: (message: string, data?: Record<string, unknown>) => {
+            const entry: Partial<LogEntry> = { ...context };
+            if (data) entry.data = data;
+            log('debug', message, entry);
+        },
 
-        info: (message: string, data?: Record<string, unknown>) =>
-            log('info', message, { ...context, data }),
+        info: (message: string, data?: Record<string, unknown>) => {
+            const entry: Partial<LogEntry> = { ...context };
+            if (data) entry.data = data;
+            log('info', message, entry);
+        },
 
-        warn: (message: string, data?: Record<string, unknown>) =>
-            log('warn', message, { ...context, data }),
+        warn: (message: string, data?: Record<string, unknown>) => {
+            const entry: Partial<LogEntry> = { ...context };
+            if (data) entry.data = data;
+            log('warn', message, entry);
+        },
 
-        error: (message: string, error?: Error, data?: Record<string, unknown>) =>
-            log('error', message, {
+        error: (message: string, error?: Error, data?: Record<string, unknown>) => {
+            const entry: Partial<LogEntry> = {
                 ...context,
-                error: error ? {
+            };
+            if (error) {
+                entry.error = {
                     message: error.message,
-                    stack: error.stack,
-                    code: (error as any).code,
-                } : undefined,
-                data,
-            }),
+                    ...(error.stack !== undefined && { stack: error.stack }),
+                    ...((error as any).code !== undefined && { code: (error as any).code }),
+                };
+            }
+            if (data) entry.data = data;
+            log('error', message, entry);
+        },
 
         event: (
             level: LogLevel,
@@ -100,11 +113,14 @@ export function createLogger(context: {
             },
             message: string,
             data?: Record<string, unknown>
-        ) => log(level, message, {
-            ...context,
-            event,
-            data,
-        }),
+        ) => {
+            const entry: Partial<LogEntry> = {
+                ...context,
+                event,
+            };
+            if (data) entry.data = data;
+            log(level, message, entry);
+        },
 
         child: (additionalContext: Record<string, string>) =>
             createLogger({ ...context, ...additionalContext }),

@@ -9,40 +9,40 @@ FROM node:20-alpine AS base
 RUN corepack enable pnpm
 
 # ============================================
-# Dependencies Stage
-# ============================================
-FROM base AS deps
-WORKDIR /app
-
-# Copy package files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY services/shared/package.json ./services/shared/
-COPY services/dashboard/package.json ./services/dashboard/
-
-# Install dependencies
-RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
-
-# ============================================
 # Builder Stage
 # ============================================
 FROM base AS builder
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/services/shared/node_modules ./services/shared/node_modules
-COPY --from=deps /app/services/dashboard/node_modules ./services/dashboard/node_modules
+# Copy workspace config
+COPY pnpm-workspace.yaml ./
+COPY package.json ./
+COPY pnpm-lock.yaml ./
 
-# Copy source
-COPY . .
+# Copy shared library
+COPY services/shared/package.json ./services/shared/
+COPY services/shared/tsconfig.json ./services/shared/
+
+# Copy dashboard
+COPY services/dashboard/package.json ./services/dashboard/
+COPY services/dashboard/tsconfig.json ./services/dashboard/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source files
+COPY tsconfig.json ./
+COPY services/shared/src ./services/shared/src
+COPY services/dashboard/app ./services/dashboard/app
+COPY services/dashboard/lib ./services/dashboard/lib
+COPY services/dashboard/next.config.js ./services/dashboard/
+COPY services/dashboard/next-env.d.ts ./services/dashboard/
 
 # Build shared library first
-WORKDIR /app/services/shared
-RUN pnpm build
+RUN pnpm --filter @mother-harness/shared build
 
 # Build dashboard
-WORKDIR /app/services/dashboard
-RUN pnpm build
+RUN pnpm --filter @mother-harness/dashboard build
 
 # ============================================
 # Production Stage
@@ -59,7 +59,6 @@ RUN adduser --system --uid 1001 nextjs
 # Copy standalone build
 COPY --from=builder /app/services/dashboard/.next/standalone ./
 COPY --from=builder /app/services/dashboard/.next/static ./services/dashboard/.next/static
-COPY --from=builder /app/services/dashboard/public ./services/dashboard/public
 
 USER nextjs
 

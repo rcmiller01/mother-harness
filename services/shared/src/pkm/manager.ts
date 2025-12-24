@@ -72,7 +72,7 @@ export class PKMManager {
             updated_at: now,
             accessed_at: now,
             source_type: options.source_type ?? 'manual',
-            source_task_id: options.source_task_id,
+            ...(options.source_task_id !== undefined && { source_task_id: options.source_task_id }),
             archived: false,
             starred: false,
         };

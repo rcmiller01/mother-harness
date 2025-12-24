@@ -45,11 +45,11 @@ export async function logAuditEvent(
         type: event.type,
         action: event.action,
         actor: event.actor,
-        resource: event.resource,
-        metadata: event.metadata ? redactPIIFromObject(event.metadata) : undefined,
-        status: event.status,
-        ip: event.ip,
-        user_agent: event.user_agent,
+        ...(event.resource !== undefined && { resource: event.resource }),
+        ...(event.metadata !== undefined && { metadata: redactPIIFromObject(event.metadata) }),
+        ...(event.status !== undefined && { status: event.status }),
+        ...(event.ip !== undefined && { ip: event.ip }),
+        ...(event.user_agent !== undefined && { user_agent: event.user_agent }),
     };
 
     await redis.set(`audit:${id}`, '$', sanitizedEvent);

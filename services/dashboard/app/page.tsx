@@ -2,6 +2,7 @@
 
 import { useEffect, useState, FormEvent } from 'react';
 import { useAuth, getAuthHeaders } from '../lib/auth';
+import type { Project } from '@mother-harness/shared';
 
 interface RunHistoryItem {
     id: string;
@@ -53,28 +54,6 @@ export default function HomePage() {
     const [projectLoading, setProjectLoading] = useState(false);
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
-    const [runs, setRuns] = useState<Run[]>([]);
-    const [runsLoading, setRunsLoading] = useState(false);
-    const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-
-    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-    const [artifactLoading, setArtifactLoading] = useState(false);
-    const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
-
-    const [libraries, setLibraries] = useState<Library[]>([]);
-    const [libraryLoading, setLibraryLoading] = useState(false);
-    const [librarySearch, setLibrarySearch] = useState('');
-    const [libraryName, setLibraryName] = useState('');
-    const [libraryPath, setLibraryPath] = useState('');
-    const [libraryDescription, setLibraryDescription] = useState('');
-    const [libraryAutoScan, setLibraryAutoScan] = useState(true);
-    const [libraryMessage, setLibraryMessage] = useState('');
-
-    const [approvals, setApprovals] = useState<Approval[]>([]);
-    const [approvalsLoading, setApprovalsLoading] = useState(false);
-    const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
-    const [approvalMessage, setApprovalMessage] = useState('');
-
     // Login form state
     const [showLogin, setShowLogin] = useState(false);
     const [email, setEmail] = useState('');
@@ -102,98 +81,12 @@ export default function HomePage() {
         }
     };
 
-    const fetchRuns = async () => {
-        if (!user?.id) return;
-        setRunsLoading(true);
-        try {
-            const response = await fetch(`/api/runs?user_id=${encodeURIComponent(user.id)}`, {
-                headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-            setRuns(data);
-            if (!selectedRunId && data.length > 0) {
-                setSelectedRunId(data[0].id);
-            }
-        } catch (error) {
-            console.error('Failed to load runs:', error);
-        } finally {
-            setRunsLoading(false);
-        }
-    };
 
-    const fetchArtifacts = async (runId: string) => {
-        setArtifactLoading(true);
-        try {
-            const response = await fetch(`/api/runs/${runId}/artifacts`, {
-                headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-            setArtifacts(data);
-            setSelectedArtifact(null);
-        } catch (error) {
-            console.error('Failed to load artifacts:', error);
-        } finally {
-            setArtifactLoading(false);
-        }
-    };
-
-    const fetchArtifactDetail = async (artifactId: string) => {
-        try {
-            const response = await fetch(`/api/artifacts/${artifactId}`, {
-                headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-            setSelectedArtifact(data);
-        } catch (error) {
-            console.error('Failed to load artifact:', error);
-        }
-    };
-
-    const fetchLibraries = async (search = '') => {
-        setLibraryLoading(true);
-        try {
-            const params = search ? `?search=${encodeURIComponent(search)}` : '';
-            const response = await fetch(`/api/libraries${params}`, {
-                headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-            setLibraries(data);
-        } catch (error) {
-            console.error('Failed to load libraries:', error);
-        } finally {
-            setLibraryLoading(false);
-        }
-    };
-
-    const fetchApprovals = async () => {
-        if (!user?.id) return;
-        setApprovalsLoading(true);
-        try {
-            const response = await fetch(`/api/approvals/pending?user_id=${encodeURIComponent(user.id)}`, {
-                headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-            setApprovals(data);
-        } catch (error) {
-            console.error('Failed to load approvals:', error);
-        } finally {
-            setApprovalsLoading(false);
-        }
-    };
 
     useEffect(() => {
         if (!isAuthenticated || !user?.id) return;
         fetchProjects();
-        fetchRuns();
-        fetchLibraries();
-        fetchApprovals();
     }, [isAuthenticated, user?.id]);
-
-    useEffect(() => {
-        if (selectedRunId) {
-            fetchArtifacts(selectedRunId);
-        }
-    }, [selectedRunId]);
 
     const handleLogin = async (e: FormEvent) => {
         e.preventDefault();
@@ -228,7 +121,6 @@ export default function HomePage() {
 
             const data = await response.json();
             setResult(data);
-            fetchRuns();
         } catch (error) {
             console.error('Failed to submit:', error);
         } finally {
@@ -278,6 +170,12 @@ export default function HomePage() {
     }, [isAuthenticated, user?.id]);
 
     const formatCurrency = (value: number) => `$${value.toFixed(2)}`;
+
+    const cardStyle = {
+        border: '1px solid #eee',
+        borderRadius: '12px',
+        padding: '1.5rem'
+    };
 
     if (authLoading) {
         return (
@@ -583,7 +481,7 @@ export default function HomePage() {
                         </div>
                     )}
                 </div>
-            )}
+            </section>
 
             <section style={{ marginTop: '3rem' }}>
                 <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Operational Dashboards</h2>

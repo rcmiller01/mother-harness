@@ -6,7 +6,7 @@
 import { type DeterministicTool, type ToolResult, getToolRegistry } from './tool-registry.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);

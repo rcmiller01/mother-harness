@@ -245,7 +245,7 @@ export class ApprovalService {
     /**
      * Generate detailed preview for approval request
      */
-    generatePreview(step: TodoItem, stepResult?: unknown): ApprovalPreview {
+    generatePreview(_step: TodoItem, stepResult?: unknown): ApprovalPreview {
         const preview: ApprovalPreview = {};
 
         if (!stepResult || typeof stepResult !== 'object') {

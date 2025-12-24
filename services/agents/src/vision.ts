@@ -10,6 +10,13 @@ import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js'
 /** Vision analysis types */
 type AnalysisType = 'describe' | 'extract_text' | 'identify_objects' | 'analyze_diagram' | 'compare';
 
+/** Visual Element (Object) */
+export interface VisualElement {
+    name: string;
+    confidence: number;
+    location: string;
+}
+
 const VISION_SYSTEM_PROMPT = `You are an expert image analyst. Your role is to:
 1. Analyze images accurately and thoroughly
 2. Extract relevant information based on the task
@@ -117,7 +124,7 @@ export class VisionAgent extends BaseAgent {
         description: string;
         analysis_type_results: Record<string, unknown>;
         extracted_text: string[];
-        objects_identified: Array<{ name: string; confidence: number; location: string }>;
+        objects_identified: VisualElement[];
         colors_dominant: string[];
         recommendations: string[];
         confidence: 'high' | 'medium' | 'low';

@@ -8,7 +8,7 @@ import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
 /** Software inventory item */
-interface SoftwareItem {
+export interface SoftwareItem {
     name: string;
     type: 'dependency' | 'tool' | 'runtime' | 'os' | 'service';
     current_version: string;
@@ -16,7 +16,7 @@ interface SoftwareItem {
 }
 
 /** Update recommendation */
-interface UpdateRecommendation {
+export interface UpdateRecommendation {
     item: SoftwareItem;
     latest_version: string;
     update_urgency: 'critical' | 'high' | 'medium' | 'low';

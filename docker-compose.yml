@@ -33,9 +33,13 @@ services:
       - "8000:8000"
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://orchestrator:${REDIS_ACL_ORCHESTRATOR_PASSWORD:-mother_dev_password}@redis-stack:6379
-      - REDIS_USERNAME=orchestrator
-      - REDIS_PASSWORD=${REDIS_ACL_ORCHESTRATOR_PASSWORD:-mother_dev_password}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-stack:6379
+      - REDIS_USERNAME=default
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_ACL_ORCHESTRATOR_PASSWORD=${REDIS_ACL_ORCHESTRATOR_PASSWORD}
+      - REDIS_ACL_DOCLING_PASSWORD=${REDIS_ACL_DOCLING_PASSWORD}
+      - REDIS_ACL_AGENTS_PASSWORD=${REDIS_ACL_AGENTS_PASSWORD}
+      - REDIS_ACL_DASHBOARD_PASSWORD=${REDIS_ACL_DASHBOARD_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_ALLOWED_DOMAINS=${GOOGLE_ALLOWED_DOMAINS}
@@ -45,6 +49,7 @@ services:
       - OLLAMA_CLOUD_API_KEY=${OLLAMA_CLOUD_API_KEY}
       - N8N_URL=${N8N_URL:-http://n8n:5678}
       - N8N_API_KEY=${N8N_API_KEY}
+      - N8N_PASSWORD=${N8N_PASSWORD}
     depends_on:
       redis-stack:
         condition: service_healthy
@@ -70,9 +75,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - REDIS_URL=redis://docling:${REDIS_ACL_DOCLING_PASSWORD:-mother_dev_password}@redis-stack:6379
-      - REDIS_USERNAME=docling
-      - REDIS_PASSWORD=${REDIS_ACL_DOCLING_PASSWORD:-mother_dev_password}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-stack:6379
+      - REDIS_USERNAME=default
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - DOCLING_API_URL=${DOCLING_API_URL:-http://localhost:8000}
       - STORAGE_PATH=/mnt/libraries
       - HEALTH_PORT=8080
@@ -132,9 +137,9 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://orchestrator:8000
       - NEXT_PUBLIC_WS_URL=ws://orchestrator:8000
-      - REDIS_URL=redis://dashboard:${REDIS_ACL_DASHBOARD_PASSWORD:-mother_dev_password}@redis-stack:6379
-      - REDIS_USERNAME=dashboard
-      - REDIS_PASSWORD=${REDIS_ACL_DASHBOARD_PASSWORD:-mother_dev_password}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-stack:6379
+      - REDIS_USERNAME=default
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     depends_on:
       orchestrator:
         condition: service_healthy

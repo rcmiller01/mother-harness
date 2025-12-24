@@ -4,12 +4,22 @@
  */
 
 import type { AgentType, DoclingJob, Library, RetrievalChunkSummary, RetrievalReport } from '@mother-harness/shared';
-import { getLLMClient, getRedisClient, getRedisJSON } from '@mother-harness/shared';
+import { getLLMClient, getRedisClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 import { nanoid } from 'nanoid';
 
 /** Librarian command types */
 type LibrarianCommand = 'create_library' | 'add_document' | 'search' | 'organize' | 'status';
+
+/** Ingestion Report */
+export interface IngestionReport {
+    command: LibrarianCommand;
+    success: boolean;
+    message: string;
+    library: string;
+    document_count: number;
+    timestamp: string;
+}
 
 const LIBRARIAN_SYSTEM_PROMPT = `You are a knowledge management specialist. Your role is to:
 1. Organize and categorize documents effectively
@@ -51,7 +61,6 @@ Return a JSON object:
 export class LibrarianAgent extends BaseAgent {
     readonly agentType: AgentType = 'librarian';
     private llm = getLLMClient();
-    private redis = getRedisJSON();
     private redisClient = getRedisClient();
 
     private readonly QUERY_CHUNK_SIZE = 1200;
@@ -477,15 +486,15 @@ export class LibrarianAgent extends BaseAgent {
 
             results.push({
                 chunk_id: chunkId,
-                library_id: (fieldMap['$.library'] as string | undefined) ?? '',
-                document_id: (fieldMap['$.document_id'] as string | undefined) ?? '',
-                document_name: (fieldMap['$.document_name'] as string | undefined) ?? '',
-                file_path: (fieldMap['$.file_path'] as string | undefined) ?? '',
-                page_number: fieldMap['$.page_number'] as number | undefined,
-                chunk_index: fieldMap['$.chunk_index'] as number | undefined,
+                library_id: (fieldMap['$.library'] as unknown as string) ?? '',
+                document_id: (fieldMap['$.document_id'] as unknown as string) ?? '',
+                document_name: (fieldMap['$.document_name'] as unknown as string) ?? '',
+                file_path: (fieldMap['$.file_path'] as unknown as string) ?? '',
+                ...(fieldMap['$.page_number'] !== undefined && { page_number: fieldMap['$.page_number'] as number }),
+                ...(fieldMap['$.chunk_index'] !== undefined && { chunk_index: fieldMap['$.chunk_index'] as number }),
                 score: similarity,
-                content_preview: this.previewContent(fieldMap['$.content'] as string | undefined),
-                content: fieldMap['$.content'] as string | undefined,
+                content_preview: this.previewContent(fieldMap['$.content'] as unknown as string | undefined),
+                ...(fieldMap['$.content'] !== undefined && { content: fieldMap['$.content'] as unknown as string }),
             });
         }
 

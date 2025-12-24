@@ -8,11 +8,11 @@ import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
 /** Issue severity levels */
-type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export type IssueSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 /** Review issue */
-interface ReviewIssue {
-    severity: Severity;
+export interface ReviewIssue {
+    severity: IssueSeverity;
     category: 'security' | 'performance' | 'correctness' | 'style' | 'documentation';
     /** Normalized alias for chaining across review agents */
     area?: string;

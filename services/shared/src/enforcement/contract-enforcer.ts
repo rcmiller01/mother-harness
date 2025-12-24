@@ -9,7 +9,7 @@ import type { Approval } from '../types/approval.js';
 import { createApproval } from '../types/approval.js';
 import { getRedisJSON } from '../redis/index.js';
 import { RoleRegistry, getRoleRegistry } from '../registry/role-registry.js';
-import { type RoleDefinition, type AgentCapability } from '../types/role.js';
+import { type AgentCapability } from '../types/role.js';
 import { nanoid } from 'nanoid';
 
 /** Result of contract validation */
@@ -222,7 +222,7 @@ export class ContractEnforcer {
             agent: step.agent,
             attempts: (existing?.attempts ?? 0) + 1,
             max_retries: maxRetries,
-            last_error: error,
+            ...(error !== undefined && { last_error: error }),
             last_attempt_at: new Date().toISOString(),
         };
 

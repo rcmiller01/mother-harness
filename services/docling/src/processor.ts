@@ -153,7 +153,7 @@ export class DocumentProcessor {
     private async extractDocument(filePath: string): Promise<ExtractionResult> {
         const resolvedPath = path.resolve(filePath);
         const extension = path.extname(filePath).toLowerCase();
-        const fileName = path.basename(filePath);
+
 
         // Check if file exists
         let stats: Awaited<ReturnType<typeof fs.stat>>;
@@ -182,7 +182,7 @@ export class DocumentProcessor {
                     title: path.basename(filePath, extension),
                     page_count: 1,
                     file_type: extension.slice(1),
-                    file_size: stats.size,
+                    file_size: Number(stats.size),
                 },
             };
         }
@@ -202,7 +202,7 @@ export class DocumentProcessor {
                     title: path.basename(filePath, extension),
                     page_count: 1,
                     file_type: extension.slice(1) || 'unknown',
-                    file_size: stats.size,
+                    file_size: Number(stats.size),
                 },
             };
         } catch {
@@ -251,9 +251,9 @@ export class DocumentProcessor {
                     author: result.metadata?.author,
                     page_count: pages.length,
                     file_type: 'pdf',
-                    file_size: stats.size,
+                    file_size: Number(stats.size),
                 },
-            };
+            } as ExtractionResult;
         } catch (error) {
             // If Docling API fails, throw error
             const message = error instanceof Error ? error.message : 'Unknown error';
@@ -303,7 +303,7 @@ export class DocumentProcessor {
                 author: parsed.info?.Author,
                 page_count: parsed.numpages ?? pages.length,
                 file_type: 'pdf',
-                file_size: stats.size,
+                file_size: Number(stats.size),
             },
         };
     }
@@ -360,13 +360,13 @@ export class DocumentProcessor {
             images: (page.images ?? []).map(img => ({
                 id: `img-${nanoid()}`,
                 file_path: img.path,
-                caption: img.caption,
+                ...(img.caption !== undefined && { caption: img.caption }),
                 page_number: page.page_number,
             })),
             tables: (page.tables ?? []).map(tbl => ({
                 id: `tbl-${nanoid()}`,
                 content: tbl.content,
-                caption: tbl.caption,
+                ...(tbl.caption !== undefined && { caption: tbl.caption }),
                 page_number: page.page_number,
             })),
         };
@@ -436,8 +436,9 @@ export class DocumentProcessor {
                 embedding: chunk.embedding,
                 images: chunk.images,
                 tables: chunk.tables,
-                page_number: chunk.page_number,
-                section_title: chunk.section_title,
+
+                ...(chunk.page_number !== undefined && { page_number: chunk.page_number }),
+                ...(chunk.section_title !== undefined && { section_title: chunk.section_title }),
                 hierarchy: chunk.hierarchy,
                 chunk_type: 'text',
                 chunk_index: i,

@@ -82,19 +82,19 @@ export class Scheduler {
             id: `sched-${nanoid()}`,
             user_id: userId,
             name: data.name,
-            description: data.description,
+            ...(data.description !== undefined && { description: data.description }),
             schedule_type: data.schedule_type,
-            cron_expression: data.cron_expression,
-            interval_ms: data.interval_ms,
-            run_at: data.run_at,
+            ...(data.cron_expression !== undefined && { cron_expression: data.cron_expression }),
+            ...(data.interval_ms !== undefined && { interval_ms: data.interval_ms }),
+            ...(data.run_at !== undefined && { run_at: data.run_at }),
             query: data.query,
-            project_id: data.project_id,
-            template_id: data.template_id,
-            template_vars: data.template_vars,
+            ...(data.project_id !== undefined && { project_id: data.project_id }),
+            ...(data.template_id !== undefined && { template_id: data.template_id }),
+            ...(data.template_vars !== undefined && { template_vars: data.template_vars }),
             next_run_at: nextRun,
             run_count: 0,
             enabled: true,
-            max_runs: data.max_runs,
+            ...(data.max_runs !== undefined && { max_runs: data.max_runs }),
             created_at: now,
             updated_at: now,
         };
@@ -150,7 +150,9 @@ export class Scheduler {
 
         task.last_run_at = new Date().toISOString();
         task.last_run_status = result.success ? 'success' : 'failure';
-        task.last_run_task_id = result.created_task_id;
+        if (result.created_task_id !== undefined) {
+            task.last_run_task_id = result.created_task_id;
+        }
         task.run_count++;
 
         // Check max runs

@@ -32,8 +32,8 @@ export class ToolExecutor {
         const result = await executeTool(tool, request.parameters ?? {});
         return {
             success: result.success,
-            result: result.output,
-            error: result.error,
+            ...(result.output !== undefined && { result: result.output }),
+            ...(result.error !== undefined && { error: result.error }),
         };
     }
 }

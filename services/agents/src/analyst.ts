@@ -93,9 +93,10 @@ export class AnalystAgent extends BaseAgent {
         totalTokens += analysis.tokens;
 
         // Generate visualizations if needed
+        // Generate visualizations if needed
         const visualizations = request.needs_viz
             ? await this.generateVisualizations(analysis.result)
-            : [];
+            : { charts: [], tokens: 0 };
         totalTokens += visualizations.tokens;
 
         return {
@@ -149,8 +150,8 @@ export class AnalystAgent extends BaseAgent {
                         : ''),
                     insights: result.data.insights || [],
                     data_points: result.data.data_points || [],
-                    trends: result.data.trends,
-                    recommendations: result.data.recommendations,
+                    ...(result.data.trends !== undefined && { trends: result.data.trends }),
+                    ...(result.data.recommendations !== undefined && { recommendations: result.data.recommendations }),
                     confidence: result.data.confidence || 'medium',
                 },
                 tokens: result.raw.tokens_used.total,
@@ -164,7 +165,7 @@ export class AnalystAgent extends BaseAgent {
                 data_points: [],
                 confidence: 'low',
             },
-            tokens: result.raw.tokens_used.total,
+            tokens: result.raw?.tokens_used?.total ?? 0,
         };
     }
 

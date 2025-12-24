@@ -159,27 +159,28 @@ export class ResourceBudgetGuard {
         // Check run budget
         const runCheck = await this.canUse('run', runId, resource, amount);
         if (!runCheck.allowed) {
-            return { allowed: false, blockedBy: 'run', warning: runCheck.warning };
+            return { allowed: false, blockedBy: 'run', ...(runCheck.warning !== undefined && { warning: runCheck.warning }) };
         }
 
         // Check user budget
         const userCheck = await this.canUse('user', userId, resource, amount);
         if (!userCheck.allowed) {
-            return { allowed: false, blockedBy: 'user', warning: userCheck.warning };
+            return { allowed: false, blockedBy: 'user', ...(userCheck.warning !== undefined && { warning: userCheck.warning }) };
         }
 
         // Check global budget
         const globalCheck = await this.canUse('global', 'global', resource, amount);
         if (!globalCheck.allowed) {
-            return { allowed: false, blockedBy: 'global', warning: globalCheck.warning };
+            return { allowed: false, blockedBy: 'global', ...(globalCheck.warning !== undefined && { warning: globalCheck.warning }) };
         }
 
         // Aggregate warnings
         const warnings = [runCheck.warning, userCheck.warning, globalCheck.warning].filter(Boolean);
+        const warningText = warnings.length > 0 ? warnings.join('; ') : undefined;
 
         return {
             allowed: true,
-            warning: warnings.length > 0 ? warnings.join('; ') : undefined,
+            ...(warningText !== undefined && { warning: warningText }),
         };
     }
 

@@ -3,7 +3,7 @@
  * FT.CREATE definitions for RediSearch indexes
  */
 
-import type Redis from 'ioredis';
+import { type Redis } from 'ioredis';
 import { getRedisClient } from './client.js';
 
 /** Index definitions for RediSearch */
@@ -15,7 +15,7 @@ export const INDEX_DEFINITIONS = {
     'idx:chunks': `
     FT.CREATE idx:chunks ON JSON PREFIX 1 chunk:
     SCHEMA
-      $.embedding AS embedding VECTOR FLAT 6 DIM 768 DISTANCE_METRIC COSINE
+      $.embedding AS embedding VECTOR FLAT 6 TYPE FLOAT32 DIM 768 DISTANCE_METRIC COSINE
       $.library AS library TAG
       $.document_id AS document_id TAG
       $.document_name AS document_name TEXT
@@ -118,7 +118,7 @@ export async function createAllIndexes(redis?: Redis): Promise<void> {
         try {
             // Create the index
             const parts = definition.trim().split(/\s+/);
-            await client.call(...parts);
+            await client.call(parts[0]!, ...parts.slice(1));
             console.log(`[Redis] Created index: ${indexName}`);
         } catch (error) {
             console.error(`[Redis] Failed to create index ${indexName}:`, error);

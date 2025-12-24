@@ -35,7 +35,7 @@ export class TaskPlanner {
     /**
      * Create an execution plan from a query
      */
-    async createPlan(query: string, context: PlanningContext): Promise<ExecutionPlan> {
+    async createPlan(query: string, _context: PlanningContext): Promise<ExecutionPlan> {
         // Detect which agents are needed based on query
         const agentsNeeded = this.detectAgents(query);
 

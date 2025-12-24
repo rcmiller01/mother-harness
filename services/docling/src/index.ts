@@ -102,10 +102,11 @@ async function processStream(
     while (true) {
         try {
             // Read from stream with blocking
-            const messages = await redis.xreadgroup(
+            const messages = await redis.call(
+                'XREADGROUP',
                 'GROUP', CONSUMER_GROUP, CONSUMER_NAME,
-                'BLOCK', 5000,
-                'COUNT', 1,
+                'BLOCK', '5000',
+                'COUNT', '1',
                 'STREAMS', STREAM_KEY, '>'
             ) as Array<[string, Array<[string, string[]]>]> | null;
 

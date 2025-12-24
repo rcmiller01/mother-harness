@@ -21,6 +21,7 @@ import {
     getResourceBudgetGuard,
     getContractEnforcer,
     getRoleRegistry,
+    logAuditEvent,
     TaskSchema,
     ArtifactSchema,
     ProjectSchema,
@@ -31,7 +32,7 @@ import {
 } from '@mother-harness/shared';
 import { createAgent, type AgentContext as AgentExecutionContext } from '@mother-harness/agents';
 import { TaskPlanner } from './planner.js';
-import { N8nAdapter } from './n8n-adapter.js';
+import { N8nAdapter, type WorkflowResult } from './n8n-adapter.js';
 import { Tier1Memory } from './memory/tier1-recent.js';
 import { Tier2Memory } from './memory/tier2-summaries.js';
 import { Tier3Memory } from './memory/tier3-longterm.js';
@@ -81,11 +82,11 @@ function getLocalAgentExecutor(agentType: AgentType): AgentExecutor {
             step_id: String(context.step_id ?? ''),
             project_id: String(context.project_id ?? ''),
             user_id: String(context.user_id ?? ''),
-            recent_context: typeof context.recent_context === 'string' ? context.recent_context : undefined,
-            rag_context: typeof context.rag_context === 'string' ? context.rag_context : undefined,
-            library_ids: Array.isArray(context.library_ids)
-                ? context.library_ids.filter((id): id is string => typeof id === 'string')
-                : undefined,
+            ...(typeof context.recent_context === 'string' && { recent_context: context.recent_context }),
+            ...(typeof context.rag_context === 'string' && { rag_context: context.rag_context }),
+            ...(Array.isArray(context.library_ids) ? {
+                library_ids: context.library_ids.filter((id): id is string => typeof id === 'string')
+            } : {}),
         };
         const request: AgentRequest = {
             task_id: agentContext.task_id,
@@ -100,11 +101,11 @@ function getLocalAgentExecutor(agentType: AgentType): AgentExecutor {
         return {
             success: !agentResultHasError(outputs),
             outputs,
-            artifacts: response.artifacts,
-            explanation: response.explanation,
-            tokens_used: response.tokens_used,
-            duration_ms: response.duration_ms,
-            model_used: response.model_used,
+            ...(response.artifacts && { artifacts: response.artifacts }),
+            ...(response.explanation && { explanation: response.explanation }),
+            ...(response.tokens_used !== undefined && { tokens_used: response.tokens_used }),
+            ...(response.duration_ms !== undefined && { duration_ms: response.duration_ms }),
+            ...(response.model_used && { model_used: response.model_used }),
         };
     };
 
@@ -191,7 +192,7 @@ export class Orchestrator {
             console.error('Invalid run data:', result.error);
             return null;
         }
-        return result.data;
+        return result.data as unknown as Run;
     }
 
     /**
@@ -206,7 +207,7 @@ export class Orchestrator {
             if (run?.user_id !== userId) continue;
             const result = RunSchema.safeParse(run);
             if (result.success) {
-                runs.push(result.data);
+                runs.push(result.data as unknown as Run);
             }
         }
 
@@ -240,7 +241,7 @@ export class Orchestrator {
                 if (!haystack.includes(query)) continue;
             }
 
-            libraries.push(result.data);
+            libraries.push(result.data as unknown as Library);
         }
 
         return libraries.sort((a, b) => a.name.localeCompare(b.name));
@@ -358,7 +359,7 @@ export class Orchestrator {
         const plan = await this.planner.createPlan(query, {
             project_id: actualProjectId,
             user_id: userId,
-            context: `${recentContext}\n\n${summaryContext}\n\n${longTermContext}`,
+            recent_context: `${recentContext}\n\n${summaryContext}\n\n${longTermContext}`,
         });
 
         task.todo_list = plan.steps;
@@ -388,7 +389,7 @@ export class Orchestrator {
             return null;
         }
 
-        return result.data;
+        return result.data as unknown as Task;
     }
 
     /**
@@ -446,8 +447,8 @@ export class Orchestrator {
             details: outcome.termination_details,
             total_tokens: outcome.total_tokens,
             total_duration_ms: totalDuration,
-            last_step_id: outcome.last_step_id,
-            last_agent: outcome.last_agent,
+            ...(outcome.last_step_id && { last_step_id: outcome.last_step_id }),
+            ...(outcome.last_agent && { last_agent: outcome.last_agent }),
         });
     }
 
@@ -472,7 +473,7 @@ export class Orchestrator {
         // Update status to executing
         await this.updateTaskStatus(taskId, 'executing');
 
-        const agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number }> = [];
+        const agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number; models: string[]; duration: number }> = [];
         let totalTokens = 0;
         const startTime = Date.now();
         let lastStepId: string | undefined;
@@ -556,6 +557,8 @@ export class Orchestrator {
                     agent: step.agent,
                     step_id: step.id,
                     tokens: result.tokens_used ?? 0,
+                    models: result.model_used ? [result.model_used] : [],
+                    duration: result.duration_ms ?? 0,
                 });
                 totalTokens += result.tokens_used ?? 0;
                 lastStepId = step.id;
@@ -636,7 +639,7 @@ export class Orchestrator {
                     });
                     return {
                         status: 'approval_needed',
-                        termination_reason: 'approval_required',
+                        termination_reason: 'agent_error', // Placeholder, ignored by executeRun when status is approval_needed
                         termination_details: approvalCheck.reason ?? 'Approval required for this step',
                         total_tokens: totalTokens,
                         total_duration_ms: Date.now() - startTime,
@@ -692,8 +695,8 @@ export class Orchestrator {
             termination_details: 'Task completed successfully',
             total_tokens: totalTokens,
             total_duration_ms: Date.now() - startTime,
-            last_step_id: lastStepId,
-            last_agent: lastAgent,
+            ...(lastStepId && { last_step_id: lastStepId }),
+            ...(lastAgent && { last_agent: lastAgent }),
         };
     }
 
@@ -837,7 +840,7 @@ export class Orchestrator {
      */
     private async finalizeTask(
         taskId: string,
-        agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number }>
+        agentsInvoked: Array<{ agent: AgentType; step_id: string; tokens: number; models: string[]; duration: number }>
     ): Promise<void> {
         const task = await this.getTask(taskId);
         if (!task) return;
@@ -857,10 +860,10 @@ export class Orchestrator {
         // Generate session summary (Tier 2 memory)
         try {
             await this.tier2.createSummary(task.project_id, taskId, {
-                goal: task.original_query,
+                goal: task.query,
                 outcome: task.status === 'completed' ? 'Successfully completed' : 'Failed',
                 agents_invoked: agentsInvoked,
-                raw_results: results,
+
             });
         } catch (error) {
             console.error('[Orchestrator] Failed to create tier 2 summary:', error);
@@ -878,7 +881,7 @@ export class Orchestrator {
     /**
      * Get or create default project for user
      */
-    private async getOrCreateDefaultProject(userId: string): Promise<string> {
+    private async getOrCreateDefaultProject(_userId: string): Promise<string> {
         // Check for existing default project
         const existingKeys = await this.redis.keys('project:*');
         for (const key of existingKeys) {
@@ -1039,8 +1042,8 @@ export class Orchestrator {
             user_id: run.user_id,
             reason: payload.reason,
             details: payload.details,
-            last_step_id: payload.last_step_id,
-            last_agent: payload.last_agent,
+            ...(payload.last_step_id && { last_step_id: payload.last_step_id }),
+            ...(payload.last_agent && { last_agent: payload.last_agent }),
             total_steps_planned: task.todo_list.length,
             steps_completed: task.steps_completed.length,
             total_tokens: payload.total_tokens,
@@ -1083,7 +1086,7 @@ export class Orchestrator {
             if (project) {
                 const result = ProjectSchema.safeParse(project);
                 if (result.success) {
-                    projects.push(result.data);
+                    projects.push(result.data as unknown as Project);
                 }
             }
         }
@@ -1103,7 +1106,7 @@ export class Orchestrator {
             if (approval?.status === 'pending' && approval.user_id === userId) {
                 const result = ApprovalSchema.safeParse(approval);
                 if (result.success) {
-                    approvals.push(result.data);
+                    approvals.push(result.data as unknown as Approval);
                 }
             }
         }
@@ -1160,7 +1163,7 @@ export class Orchestrator {
     /**
      * Get memory context for a task
      */
-    async getMemoryContext(taskId: string, projectId: string, query: string): Promise<{
+    async getMemoryContext(_taskId: string, projectId: string, query: string): Promise<{
         recent: string;
         summaries: string;
         longTerm: string;

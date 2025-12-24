@@ -36,8 +36,8 @@ export interface ChatMessage {
 
 export class OllamaAdapter {
     private localUrl: string;
-    private cloudUrl?: string;
-    private cloudApiKey?: string;
+    // private cloudUrl?: string; // Unused
+    // private cloudApiKey?: string; // Unused
     private defaultModel = 'gpt-oss:20b';
 
     constructor() {

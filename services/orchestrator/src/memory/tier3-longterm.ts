@@ -4,7 +4,7 @@
  */
 
 import type { LongTermMemory, Project } from '@mother-harness/shared';
-import { getRedisClient, getRedisJSON, getLLMClient } from '@mother-harness/shared';
+import { getRedisJSON, getLLMClient } from '@mother-harness/shared';
 import { nanoid } from 'nanoid';
 
 /** Memory categories */
@@ -17,11 +17,12 @@ export type MemoryCategory =
     | 'other';
 
 /** Memory with embedding */
+// EmbeddedMemory extends LongTermMemory from shared
 interface EmbeddedMemory extends LongTermMemory {
-    category: MemoryCategory;
     importance: number; // 0-1 scale
     access_count: number;
     last_accessed: string;
+    // We will store category in metadata.type
 }
 
 /** Extraction result from LLM */
@@ -54,7 +55,7 @@ Only include truly important information. Return empty array if nothing worth re
 
 export class Tier3Memory {
     private redis = getRedisJSON();
-    private redisClient = getRedisClient();
+    // private redisClient = getRedisClient(); // Unused
     private llm = getLLMClient();
     private readonly memoryPrefix = 'memory:';
 
@@ -73,20 +74,32 @@ export class Tier3Memory {
         // Generate embedding using LLM client
         const embedding = await this.generateEmbedding(content);
 
+        const memoryId = `mem-${nanoid()}`;
+
+        // Map category to allowed types or default to 'finding'
+        const type = (['decision', 'finding', 'code', 'artifact'].includes(metadata.category ?? '')
+            ? metadata.category
+            : 'finding') as LongTermMemory['metadata']['type'];
+
         const memory: EmbeddedMemory = {
-            id: `mem-${nanoid()}`,
+            chunk_id: memoryId,
+            project_id: projectId,
             content,
             embedding,
-            source: metadata.source,
-            created_at: new Date().toISOString(),
-            category: metadata.category ?? 'other',
+            metadata: {
+                type,
+                session_id: 'unknown', // Tier 3 doesn't always know session
+                timestamp: new Date().toISOString(),
+                tags: [metadata.source, metadata.category ?? 'other'],
+            },
             importance: metadata.importance ?? 0.5,
             access_count: 0,
             last_accessed: new Date().toISOString(),
         };
 
         // Store in Redis with vector
-        await this.redis.set(`${this.memoryPrefix}${memory.id}`, '$', memory);
+        // Store in Redis with vector
+        await this.redis.set(`${this.memoryPrefix}${memory.chunk_id}`, '$', memory);
 
         // Update project's long-term memory reference
         await this.addToProject(projectId, memory);
@@ -106,7 +119,7 @@ export class Tier3Memory {
         const queryEmbedding = await this.generateEmbedding(query);
 
         // Get project memories
-        const project = await this.redis.get(`project:${projectId}`) as Project | null;
+        const project = await this.redis.get(`project:${projectId}`) as (Project & { long_term_memory?: LongTermMemory[] }) | null;
         if (!project?.long_term_memory || project.long_term_memory.length === 0) {
             return [];
         }
@@ -115,7 +128,7 @@ export class Tier3Memory {
         const scoredMemories: Array<{ memory: LongTermMemory; score: number }> = [];
 
         for (const memRef of project.long_term_memory) {
-            const fullMem = await this.redis.get(`${this.memoryPrefix}${memRef.id}`) as EmbeddedMemory | null;
+            const fullMem = await this.redis.get(`${this.memoryPrefix}${memRef.chunk_id}`) as EmbeddedMemory | null;
             if (!fullMem?.embedding) continue;
 
             const score = this.cosineSimilarity(queryEmbedding, fullMem.embedding);
@@ -138,7 +151,7 @@ export class Tier3Memory {
 
         // Update access stats for retrieved memories
         for (const mem of topMemories) {
-            await this.recordAccess(mem.id);
+            await this.recordAccess(mem.chunk_id);
         }
 
         return topMemories;
@@ -178,7 +191,7 @@ export class Tier3Memory {
             memories
                 .map((m, i) => {
                     const mem = m as EmbeddedMemory;
-                    return `${i + 1}. [${mem.category}] ${m.content} (from: ${m.source})`;
+                    return `${i + 1}. [${mem.metadata.type}] ${m.content}`;
                 })
                 .join('\n');
     }
@@ -246,7 +259,7 @@ export class Tier3Memory {
      * Add memory reference to project
      */
     private async addToProject(projectId: string, memory: LongTermMemory): Promise<void> {
-        const project = await this.redis.get(`project:${projectId}`) as Project | null;
+        const project = await this.redis.get(`project:${projectId}`) as (Project & { long_term_memory?: LongTermMemory[] }) | null;
         if (!project) return;
 
         const memories = [...(project.long_term_memory ?? []), memory];
@@ -289,22 +302,22 @@ export class Tier3Memory {
         const importanceThreshold = options.importance_below ?? 0.3;
         const cutoff = new Date(Date.now() - threshold * 24 * 60 * 60 * 1000);
 
-        const project = await this.redis.get(`project:${projectId}`) as Project | null;
+        const project = await this.redis.get(`project:${projectId}`) as (Project & { long_term_memory?: LongTermMemory[] }) | null;
         if (!project?.long_term_memory) return 0;
 
         let forgotten = 0;
         const kept: LongTermMemory[] = [];
 
         for (const mem of project.long_term_memory) {
-            const memFull = await this.redis.get(`${this.memoryPrefix}${mem.id}`) as EmbeddedMemory | null;
+            const memFull = await this.redis.get(`${this.memoryPrefix}${mem.chunk_id}`) as EmbeddedMemory | null;
 
-            const isOld = new Date(mem.created_at) < cutoff;
+            const isOld = new Date(mem.metadata.timestamp) < cutoff;
             const isLowImportance = (memFull?.importance ?? 1) < importanceThreshold;
             const isLowAccess = (memFull?.access_count ?? 0) < 3;
 
             if (isOld && isLowImportance && isLowAccess) {
                 // Forget this memory
-                await this.redis.del(`${this.memoryPrefix}${mem.id}`);
+                await this.redis.del(`${this.memoryPrefix}${mem.chunk_id}`);
                 forgotten++;
             } else {
                 kept.push(mem);

@@ -16,6 +16,17 @@ interface RetrievedChunk {
     metadata?: Record<string, unknown>;
 }
 
+/** RAG Agent Result */
+export interface RAGResult {
+    answer: string;
+    sources: RetrievedChunk[];
+    confidence: 'high' | 'medium' | 'low';
+    reasoning: string;
+    related_topics: string[];
+    chunks_retrieved: number;
+    retrieval_report: RetrievalReport;
+}
+
 const RAG_SYSTEM_PROMPT = `You are a helpful assistant with access to a knowledge base. Your role is to:
 1. Answer questions accurately using the provided context
 2. Cite sources when making claims
@@ -297,15 +308,15 @@ export class RAGAgent extends BaseAgent {
 
             results.push({
                 chunk_id: chunkId,
-                library_id: (fieldMap['$.library'] as string | undefined) ?? '',
-                document_id: (fieldMap['$.document_id'] as string | undefined) ?? '',
-                document_name: (fieldMap['$.document_name'] as string | undefined) ?? '',
-                file_path: (fieldMap['$.file_path'] as string | undefined) ?? '',
-                page_number: fieldMap['$.page_number'] as number | undefined,
-                chunk_index: fieldMap['$.chunk_index'] as number | undefined,
+                library_id: (fieldMap['$.library'] as unknown as string) ?? '',
+                document_id: (fieldMap['$.document_id'] as unknown as string) ?? '',
+                document_name: (fieldMap['$.document_name'] as unknown as string) ?? '',
+                file_path: (fieldMap['$.file_path'] as unknown as string) ?? '',
+                ...(fieldMap['$.page_number'] !== undefined && { page_number: fieldMap['$.page_number'] as number }),
+                ...(fieldMap['$.chunk_index'] !== undefined && { chunk_index: fieldMap['$.chunk_index'] as number }),
                 score: similarity,
-                content_preview: this.previewContent(fieldMap['$.content'] as string | undefined),
-                content: fieldMap['$.content'] as string | undefined,
+                content_preview: this.previewContent(fieldMap['$.content'] as unknown as string | undefined),
+                ...(fieldMap['$.content'] !== undefined && { content: fieldMap['$.content'] as unknown as string }),
             });
         }
 
@@ -360,17 +371,22 @@ export class RAGAgent extends BaseAgent {
             embedding_model: embeddingResult.model,
             requested_k: this.DEFAULT_TOP_K,
             retrieved_at: new Date().toISOString(),
-            results: chunks.map((chunk) => ({
-                chunk_id: chunk.id,
-                library_id: (chunk.metadata?.library_id as string) ?? '',
-                document_id: (chunk.metadata?.document_id as string) ?? '',
-                document_name: (chunk.metadata?.document_name as string) ?? chunk.source,
-                file_path: (chunk.metadata?.file_path as string) ?? chunk.source,
-                page_number: chunk.metadata?.page_number as number | undefined,
-                chunk_index: chunk.metadata?.chunk_index as number | undefined,
-                score: chunk.score,
-                content_preview: this.previewContent(chunk.content),
-            })),
+            results: chunks.map((chunk) => {
+                const pageNumber = chunk.metadata?.page_number as number | undefined;
+                const chunkIndex = chunk.metadata?.chunk_index as number | undefined;
+
+                return {
+                    chunk_id: chunk.id,
+                    library_id: (chunk.metadata?.library_id as string) ?? '',
+                    document_id: (chunk.metadata?.document_id as string) ?? '',
+                    document_name: (chunk.metadata?.document_name as string) ?? chunk.source,
+                    file_path: (chunk.metadata?.file_path as string) ?? chunk.source,
+                    ...(pageNumber !== undefined && { page_number: pageNumber }),
+                    ...(chunkIndex !== undefined && { chunk_index: chunkIndex }),
+                    score: chunk.score,
+                    content_preview: this.previewContent(chunk.content),
+                };
+            }),
         };
     }
 }

@@ -5,6 +5,7 @@
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import websocket from '@fastify/websocket';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
@@ -20,7 +21,6 @@ import {
     resolveLibraryAccess,
 } from '@mother-harness/shared';
 import { Orchestrator } from './orchestrator.js';
-import { getCostTracker } from './cost-tracker.js';
 import { config } from './config.js';
 import { registerAuth, requireRole, type UserSession } from './auth.js';
 import { registerProductionExecutors } from './executors/index.js';
@@ -34,7 +34,7 @@ const app = Fastify({
         transport: config.nodeEnv === 'development'
             ? { target: 'pino-pretty' }
             : undefined,
-    },
+    } as any, // Cast to any to avoid strict definition mismatch
 });
 
 // Orchestrator instance
@@ -115,12 +115,35 @@ async function registerPlugins() {
         staticCSP: true,
     });
 
+    // Register security headers
+    await app.register(helmet, {
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "'unsafe-inline'"], // unsafe-inline needed for Swagger UI
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", 'data:', 'https:'],
+                connectSrc: ["'self'"],
+                fontSrc: ["'self'"],
+                objectSrc: ["'none'"],
+                mediaSrc: ["'self'"],
+                frameSrc: ["'none'"],
+            },
+        },
+        crossOriginEmbedderPolicy: false, // Disable for API server
+        hsts: {
+            maxAge: 31536000, // 1 year
+            includeSubDomains: true,
+            preload: true,
+        },
+    });
+
     await app.register(cors, {
         origin: config.corsOrigin,
     });
 
     await app.register(websocket);
-    await registerAuth(app);
+    await registerAuth(app as any);
 }
 
 // Health check endpoint
@@ -145,7 +168,7 @@ app.post('/api/ask', { preHandler: requireRole('user', 'admin') }, async (reques
         .filter(Boolean);
 
     const access = resolveLibraryAccess(requestedLibraries, user.roles, {
-        allowedLibraryIds,
+        ...(allowedLibraryIds && { allowedLibraryIds }),
     });
 
     if (access.denied.length > 0) {
@@ -155,7 +178,7 @@ app.post('/api/ask', { preHandler: requireRole('user', 'admin') }, async (reques
 
     try {
         const { run, task } = await orchestrator.createRun(
-            body.user_id,
+            user.user_id,
             body.query,
             body.project_id
         );
@@ -243,8 +266,8 @@ app.get('/api/runs/:id/replay', async (request, reply) => {
 
     try {
         const replay = await orchestrator.getRunReplay(id, {
-            limit: safeLimit,
-            direction,
+            ...(safeLimit !== undefined && { limit: safeLimit }),
+            ...(direction && { direction }),
         });
         if (!replay) {
             reply.status(404);
@@ -316,7 +339,7 @@ app.post('/api/approvals/:id/respond', { preHandler: requireRole('approver', 'ad
             action: approved ? 'approved' : 'rejected',
             actor: {
                 user_id: user.user_id,
-                email: user.email,
+                ...(user.email !== undefined && { email: user.email }),
                 roles: user.roles,
             },
             resource: {
@@ -511,11 +534,11 @@ app.get('/ws', { websocket: true, preHandler: requireRole('user', 'admin') }, (c
 
     app.log.info({ task_id: taskId }, 'WebSocket connection established');
 
-    socket.on('message', (message) => {
+    socket.on('message', (message: any) => {
         try {
             const data = JSON.parse(message.toString());
             app.log.debug({ data }, 'WebSocket message received');
-            
+
             // Handle ping/pong for keepalive
             if (data.type === 'ping') {
                 socket.send(JSON.stringify({ type: 'pong' }));
@@ -529,14 +552,14 @@ app.get('/ws', { websocket: true, preHandler: requireRole('user', 'admin') }, (c
         app.log.info({ task_id: taskId }, 'WebSocket connection closed');
     });
 
-    socket.on('error', (error) => {
+    socket.on('error', (error: Error) => {
         app.log.error({ error, task_id: taskId }, 'WebSocket error');
     });
 
     // Send initial connection confirmation
-    socket.send(JSON.stringify({ 
-        type: 'connected', 
-        task_id: taskId 
+    socket.send(JSON.stringify({
+        type: 'connected',
+        task_id: taskId
     }));
 });
 
@@ -554,7 +577,7 @@ app.addHook('onResponse', async (request, reply) => {
             action: request.method,
             actor: {
                 user_id: user.user_id,
-                email: user.email,
+                ...(user.email !== undefined && { email: user.email }),
                 roles: user.roles,
             },
             resource: {
@@ -571,7 +594,7 @@ app.addHook('onResponse', async (request, reply) => {
             },
             status: reply.statusCode < 400 ? 'success' : 'error',
             ip: request.ip,
-            user_agent: request.headers['user-agent'],
+            ...(request.headers['user-agent'] && { user_agent: request.headers['user-agent'] }),
         });
     } catch (error) {
         app.log.warn({ error }, 'Failed to write audit log');

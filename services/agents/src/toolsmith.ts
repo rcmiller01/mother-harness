@@ -3,13 +3,12 @@
  * Creates and manages deterministic tools for the agent system
  */
 
-import type { AgentType } from '@mother-harness/shared';
-import { getLLMClient, getToolRegistry } from '@mother-harness/shared';
+import type { AgentType, ToolParameter } from '@mother-harness/shared';
+import { getLLMClient, getToolRegistry, registerHandler } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
-import { nanoid } from 'nanoid';
 
 /** Tool definition */
-interface ToolDefinition {
+export interface ToolDefinition {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
@@ -182,29 +181,48 @@ export class ToolsmithAgent extends BaseAgent {
         try {
             const registry = getToolRegistry();
 
-            await registry.register({
+            // Register handler in memory
+            registerHandler(tool.name, async (params: Record<string, unknown>) => {
+                // Create sandboxed execution context
+                const fn = new Function(
+                    'params',
+                    'console',
+                    'JSON',
+                    'Math',
+                    'Date',
+                    `return (async () => { ${tool.implementation} })()`
+                );
+
+                return fn(
+                    params,
+                    console,
+                    JSON,
+                    Math,
+                    Date
+                );
+            });
+
+            // Convert parameters to inputs
+            const inputs: ToolParameter[] = Object.entries(tool.parameters).map(([name, def]) => {
+                const d = def as { type: string; description: string; required: boolean; default?: unknown };
+                return {
+                    name,
+                    type: (d.type as 'string' | 'number' | 'boolean' | 'object' | 'array') || 'string',
+                    required: d.required ?? false,
+                    description: d.description || '',
+                    default: d.default,
+                };
+            });
+
+            // Register tool definition
+            await registry.registerTool({
                 name: tool.name,
                 description: tool.description,
-                parameters: tool.parameters,
-                handler: async (params: Record<string, unknown>) => {
-                    // Create sandboxed execution context
-                    const fn = new Function(
-                        'params',
-                        'console',
-                        'JSON',
-                        'Math',
-                        'Date',
-                        `return (async () => { ${tool.implementation} })()`
-                    );
-
-                    return fn(
-                        params,
-                        console,
-                        JSON,
-                        Math,
-                        Date
-                    );
-                },
+                inputs,
+                outputs: [], // Toolsmith doesn't currently generate structured outputs
+                handler: tool.name,
+                timeout_ms: 30000,
+                enabled: true,
             });
         } catch (error) {
             console.error('[ToolsmithAgent] Failed to register tool:', error);

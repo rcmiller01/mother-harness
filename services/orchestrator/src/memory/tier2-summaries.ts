@@ -39,8 +39,7 @@ export class Tier2Memory {
         details: {
             goal: string;
             outcome: string;
-            agents_invoked: SessionSummary['agents_invoked'];
-            raw_results?: string;
+            agents_invoked: { agent: string; models: string[]; tokens: number; duration: number }[];
         }
     ): Promise<SessionSummary> {
         // Generate LLM summary if we have enough content
@@ -51,11 +50,11 @@ export class Tier2Memory {
             follow_up_items?: string[];
         } | null = null;
 
-        if (details.raw_results && details.raw_results.length > 50) {
+        if (details.agents_invoked.length > 0) {
             const prompt = SUMMARY_PROMPT
                 .replace('{goal}', details.goal)
                 .replace('{agents}', details.agents_invoked.map(a => a.agent).join(', '))
-                .replace('{results}', details.raw_results.substring(0, 2000));
+                .replace('{results}', details.goal); // Fallback since we removed raw_results
 
             const result = await this.llm.json<{
                 summary: string;
@@ -74,12 +73,14 @@ export class Tier2Memory {
         }
 
         const summary: SessionSummary = {
-            id: `summary-${nanoid()}`,
-            task_id: taskId,
+            session_id: `session-${nanoid()}`,
+            started: new Date().toISOString(), // Approximate if not provided
+            ended: new Date().toISOString(),
+            task_ids: [taskId],
             summary: llmSummary?.summary ?? `${details.goal} - ${details.outcome}`,
-            key_findings: llmSummary?.key_findings ?? [details.outcome],
-            agents_invoked: details.agents_invoked,
-            timestamp: new Date().toISOString(),
+            key_decisions: llmSummary?.key_findings ?? [details.outcome],
+            agents_used: details.agents_invoked.map(a => a.agent as any),
+            artifacts: [],
         };
 
         // Get current project
@@ -118,9 +119,9 @@ export class Tier2Memory {
 
         return recent
             .map((s, i) => {
-                const agents = s.agents_invoked.map(a => a.agent).join(', ');
-                const findings = s.key_findings.slice(0, 2).join('; ');
-                return `Session ${i + 1} (${new Date(s.timestamp).toLocaleDateString()}):\n  Summary: ${s.summary}\n  Agents: ${agents}\n  Key Findings: ${findings}`;
+                const agents = s.agents_used.join(', ');
+                const findings = s.key_decisions.slice(0, 2).join('; ');
+                return `Session ${i + 1} (${new Date(s.ended).toLocaleDateString()}):\n  Summary: ${s.summary}\n  Agents: ${agents}\n  Key Findings: ${findings}`;
             })
             .join('\n\n');
     }
@@ -134,7 +135,7 @@ export class Tier2Memory {
 
         return summaries.filter(s =>
             s.summary.toLowerCase().includes(lowerKeyword) ||
-            s.key_findings.some(f => f.toLowerCase().includes(lowerKeyword))
+            s.key_decisions.some(f => f.toLowerCase().includes(lowerKeyword))
         );
     }
 
@@ -143,7 +144,7 @@ export class Tier2Memory {
      */
     async getSummaryByTask(projectId: string, taskId: string): Promise<SessionSummary | undefined> {
         const summaries = await this.getSummaries(projectId);
-        return summaries.find(s => s.task_id === taskId);
+        return summaries.find(s => s.task_ids.includes(taskId));
     }
 
     /**
@@ -157,8 +158,8 @@ export class Tier2Memory {
         }
 
         // Compile all findings
-        const allFindings = summaries.flatMap(s => s.key_findings);
-        const allAgents = [...new Set(summaries.flatMap(s => s.agents_invoked.map(a => a.agent)))];
+        const allFindings = summaries.flatMap(s => s.key_decisions);
+        const allAgents = [...new Set(summaries.flatMap(s => s.agents_used))];
 
         const prompt = `Create a brief project summary:
 

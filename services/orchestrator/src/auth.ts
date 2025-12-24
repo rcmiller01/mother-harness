@@ -130,6 +130,7 @@ async function validateGoogleToken(
         }
 
         const domain = payload.hd ?? payload.email.split('@')[1];
+        if (!domain) return null;
         if (options.allowedDomains.length > 0 && !options.allowedDomains.includes(domain)) {
             return null;
         }
@@ -144,8 +145,8 @@ async function validateGoogleToken(
 
         return {
             user_id: payload.sub,
-            email: payload.email,
-            name: payload.name,
+            ...(payload.email !== undefined && { email: payload.email }),
+            ...(payload.name !== undefined && { name: payload.name }),
             roles: Array.from(new Set(roles)),
             created_at: new Date((payload.iat ?? 0) * 1000).toISOString(),
             last_activity: new Date().toISOString(),
@@ -209,8 +210,8 @@ async function validateJWT(token: string, secret: string): Promise<UserSession |
 
         return {
             user_id: payload.sub,
-            email: payload.email,
-            name: payload.name,
+            ...(payload.email !== undefined && { email: payload.email }),
+            ...(payload.name !== undefined && { name: payload.name }),
             roles: payload.roles ?? ['user'],
             created_at: new Date((payload.iat ?? 0) * 1000).toISOString(),
             last_activity: new Date().toISOString(),

@@ -4,7 +4,7 @@
  */
 
 import type { AgentType } from '@mother-harness/shared';
-import { getLLMClient, type LLMResult } from '@mother-harness/shared';
+import { getLLMClient } from '@mother-harness/shared';
 import { BaseAgent, type AgentContext, type AgentResult } from './base-agent.js';
 
 /** Code change structure */

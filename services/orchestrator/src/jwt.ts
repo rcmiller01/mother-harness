@@ -41,8 +41,8 @@ export function generateToken(
 
     const payload: JWTPayload = {
         sub: userId,
-        email: claims.email,
-        name: claims.name,
+        ...(claims.email !== undefined && { email: claims.email }),
+        ...(claims.name !== undefined && { name: claims.name }),
         roles: claims.roles ?? ['user'],
         iat: now,
         exp: now + expiresIn,
@@ -100,11 +100,14 @@ export function authenticateUser(
     const userId = `user-${email.toLowerCase().split('@')[0]}`;
 
     return {
-        token: generateToken(userId, {
-            email,
-            name: user.name,
-            roles: user.roles,
-        }),
+        token: generateToken(
+            userId,
+            {
+                ...(email !== undefined && { email }),
+                ...(user.name !== undefined && { name: user.name }),
+                ...(user.roles !== undefined && { roles: user.roles }),
+            }
+        ),
         refreshToken: generateRefreshToken(),
     };
 }

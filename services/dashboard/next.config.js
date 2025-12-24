@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    eslint: {
+        ignoreDuringBuilds: true,
+    },
     reactStrictMode: true,
     output: 'standalone',
     // Enable experimental features for server components

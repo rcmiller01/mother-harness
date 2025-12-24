@@ -81,7 +81,7 @@ export class TemplateLibrary {
             category: data.category,
             template: data.template,
             variables,
-            target_agents: data.target_agents,
+            ...(data.target_agents !== undefined && { target_agents: data.target_agents }),
             use_count: 0,
             owner_id: ownerId,
             shared: data.shared ?? false,

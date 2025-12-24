@@ -25,7 +25,7 @@ interface RawConcern {
 }
 
 /** Identified concern (normalized for chaining) */
-interface Concern extends RawConcern {
+export interface Concern extends RawConcern {
     /** Normalized severity; always present */
     severity: Severity;
     /** Normalized alias for chaining across review agents */
@@ -34,8 +34,11 @@ interface Concern extends RawConcern {
     recommendation?: string;
 }
 
+/** Alias for compatibility */
+export type Challenge = Concern;
+
 /** Alternative approach */
-interface Alternative {
+export interface Alternative {
     name: string;
     description: string;
     trade_offs: string;
@@ -160,11 +163,17 @@ export class SkepticAgent extends BaseAgent {
         if (result.data) {
             const normalizedConcerns: Concern[] = (result.data.concerns || []).map((c): Concern => {
                 const severity = c.severity ?? mapLegacyLevelToSeverity(c.level);
+                const recommendation = c.recommendation ?? c.mitigation;
+
                 return {
-                    ...c,
+                    issue: c.issue,
+                    area: c.area,
+                    potential_impact: c.potential_impact,
+                    ...(c.level !== undefined && { level: c.level }),
                     severity,
                     description: c.issue,
-                    recommendation: c.recommendation ?? c.mitigation,
+                    ...(recommendation !== undefined && { recommendation }),
+                    ...(c.mitigation !== undefined && { mitigation: c.mitigation }),
                 };
             });
 

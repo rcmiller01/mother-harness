@@ -40,7 +40,7 @@ export class Tier1Memory {
             id: `msg-${nanoid()}`,
             role: 'assistant',
             content,
-            agent_invoked: agentInvoked,
+            ...(agentInvoked && { agent_invoked: agentInvoked }),
             timestamp: new Date().toISOString(),
         };
 

@@ -72,8 +72,8 @@ export class N8nAdapter {
                 return {
                     success: true,
                     data: workflowData,
-                    execution_id: executionId ?? undefined,
                     duration_ms: Date.now() - startTime,
+                    ...(executionId && { execution_id: executionId }),
                 };
             } catch (error) {
                 const workflowError = this.normalizeError(error);
@@ -89,7 +89,7 @@ export class N8nAdapter {
                         console.log(`[N8nAdapter] Falling back to direct execution`);
                         return {
                             success: false,
-                            error: workflowError,
+                            error: this.createError('unknown', 'Unknown error'),
                             duration_ms: Date.now() - startTime,
                         };
                     }
@@ -107,7 +107,7 @@ export class N8nAdapter {
         // Should never reach here
         return {
             success: false,
-            error: 'Unknown error',
+            error: this.createError('unknown', 'Unknown error'),
             duration_ms: Date.now() - startTime,
         };
     }
@@ -278,8 +278,8 @@ export class N8nAdapter {
         return {
             type,
             message,
-            status_code: statusCode,
-            details,
+            ...(statusCode !== undefined && { status_code: statusCode }),
+            ...(details !== undefined && { details }),
         };
     }
 

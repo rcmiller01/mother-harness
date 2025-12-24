@@ -3,7 +3,7 @@
  * Prometheus-compatible metrics for observability
  */
 
-import { getRedisClient } from '@mother-harness/shared';
+// import { getRedisClient } from '@mother-harness/shared';
 
 /** Metric types */
 export type MetricType = 'counter' | 'gauge' | 'histogram';

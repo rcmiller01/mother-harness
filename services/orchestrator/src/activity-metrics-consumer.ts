@@ -100,18 +100,19 @@ export function startActivityMetricsConsumer(options: ActivityMetricsConsumerOpt
         });
 
         while (running) {
-            const response = await redis.xreadgroup(
+            const response = await redis.call(
+                'XREADGROUP',
                 'GROUP',
                 groupName,
                 consumerName,
                 'BLOCK',
-                blockMs,
+                String(blockMs),
                 'COUNT',
-                batchSize,
+                String(batchSize),
                 'STREAMS',
                 streamKey,
                 '>'
-            );
+            ) as [string, [string, string[]][]][];
 
             if (!response) continue;
 

@@ -41,6 +41,7 @@ WORKDIR /app
 # Copy built artifacts
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/pnpm-lock.yaml ./
 COPY --from=builder /app/services/shared/package.json ./services/shared/
 COPY --from=builder /app/services/shared/dist ./services/shared/dist
 COPY --from=builder /app/services/docling/package.json ./services/docling/
