@@ -30,7 +30,7 @@ services:
       dockerfile: ./services/orchestrator/Dockerfile
     container_name: mother-orchestrator
     ports:
-      - "8000:8000"
+      - "8002:8002"
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-stack:6379
@@ -106,7 +106,7 @@ services:
     image: n8nio/n8n:latest
     container_name: mother-n8n
     ports:
-      - "5678:5678"
+      - "5679:5679"
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
