@@ -71,8 +71,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // Check for existing token on mount
+    // Check for dev mode bypass or existing token on mount
     useEffect(() => {
+        // Dev mode: auto-authenticate when DEV_API_KEY is set
+        const devApiKey = process.env.NEXT_PUBLIC_DEV_API_KEY;
+        if (devApiKey && devApiKey.length > 0) {
+            console.log('[Auth] Dev mode bypass enabled');
+            setUser({
+                id: 'dev-user',
+                email: 'dev@localhost',
+                name: 'Dev Mode',
+                roles: ['admin', 'dev'],
+            });
+            setLoading(false);
+            return;
+        }
+
+        // Normal flow: check for existing token
         const token = getStoredToken();
         if (token) {
             const decoded = decodeToken(token);

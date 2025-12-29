@@ -1,0 +1,101 @@
+/* Right Panel Styles */
+
+.panel {
+    display: flex;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-primary);
+    position: relative;
+}
+
+.resizeHandle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    transition: background var(--transition-fast);
+}
+
+.resizeHandle:hover,
+.resizeHandle.resizing {
+    background: var(--accent-primary);
+}
+
+.content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Header */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.tabs {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+}
+
+.activeTab {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.activeTab:hover {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.collapseButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.collapseButton:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* Tab Content */
+.tabContent {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--spacing-md);
+}

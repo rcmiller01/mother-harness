@@ -13,6 +13,12 @@
     "moduleResolution": "bundler",
     "allowJs": true,
     "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
     "plugins": [
       {
         "name": "next"

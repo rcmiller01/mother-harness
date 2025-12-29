@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    // Transpile workspace packages that ship ESM/TS
+    transpilePackages: ['@mother-harness/shared'],
     eslint: {
         ignoreDuringBuilds: true,
     },
@@ -14,7 +16,11 @@ const nextConfig = {
         return [
             {
                 source: '/api/:path*',
-                destination: `${process.env.ORCHESTRATOR_URL || 'http://localhost:8000'}/api/:path*`,
+                destination: `${process.env.ORCHESTRATOR_URL || 'http://192.168.50.219:8002'}/api/:path*`,
+            },
+            {
+                source: '/health',
+                destination: `${process.env.ORCHESTRATOR_URL || 'http://192.168.50.219:8002'}/health`,
             },
         ];
     },
