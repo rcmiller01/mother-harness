@@ -5,6 +5,18 @@ import React from 'react';
 import { IdentityProvider } from '../components/identity/IdentityProvider';
 import { EventStreamProvider } from '../components/providers/EventStreamProvider';
 import { ErrorBoundary } from '../components/providers/ErrorBoundary';
+import { ToastProvider } from '../components/ui/Toast';
+import { useUIStore } from '../stores/uiStore';
+
+function ThemeWrapper({ children }: { children: React.ReactNode }) {
+    const theme = useUIStore((s) => s.theme);
+
+    React.useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+    }, [theme]);
+
+    return <>{children}</>;
+}
 
 export default function RootLayout({
     children,
@@ -12,7 +24,7 @@ export default function RootLayout({
     children: React.ReactNode;
 }) {
     return (
-        <html lang="en">
+        <html lang="en" data-theme="dark">
             <head>
                 <title>Mother-Harness | Mission Control</title>
                 <meta name="description" content="Multi-agent orchestration dashboard" />
@@ -24,11 +36,15 @@ export default function RootLayout({
             </head>
             <body>
                 <ErrorBoundary>
-                    <IdentityProvider>
-                        <EventStreamProvider>
-                            {children}
-                        </EventStreamProvider>
-                    </IdentityProvider>
+                    <ToastProvider>
+                        <IdentityProvider>
+                            <EventStreamProvider>
+                                <ThemeWrapper>
+                                    {children}
+                                </ThemeWrapper>
+                            </EventStreamProvider>
+                        </IdentityProvider>
+                    </ToastProvider>
                 </ErrorBoundary>
             </body>
         </html>
