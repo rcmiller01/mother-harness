@@ -2,7 +2,6 @@
  * Redis Client
  * Singleton Redis connection with JSON operations
  */
-
 import { Redis, type RedisOptions } from 'ioredis';
 
 /** Redis connection configuration */
@@ -83,6 +82,7 @@ export function getRedisClient(config: RedisConfig = {}): Redis {
         // Parse URL into discrete options for better compatibility
         options = parseRedisUrl(mergedConfig.url || envUrl!);
     } else {
+<<<<<<< HEAD
         options = {
             host: mergedConfig.host ?? 'localhost',
             port: mergedConfig.port ?? 6379,
@@ -128,6 +128,21 @@ export function getRedisClient(config: RedisConfig = {}): Redis {
 
     // Detailed error handling
     client.on('error', (err: Error) => {
+=======
+        const options: Record<string, string | number | undefined> = {
+            host: mergedConfig.host,
+            port: mergedConfig.port,
+            db: mergedConfig.db,
+        };
+        if (mergedConfig.password) options.password = mergedConfig.password;
+        if (mergedConfig.keyPrefix) options.keyPrefix = mergedConfig.keyPrefix;
+        
+        client = new Redis(options);
+    }
+
+    // Error handling
+    client!.on('error', (err: Error) => {
+>>>>>>> d0c8d4c (fix: TypeScript errors, test failures, and add unit tests)
         console.error('[Redis] Connection error:', err.message);
         console.error('[Redis] Error details:', {
             name: err.name,
@@ -135,6 +150,7 @@ export function getRedisClient(config: RedisConfig = {}): Redis {
         });
     });
 
+<<<<<<< HEAD
     client.on('connect', () => {
         console.log('[Redis] TCP connection established');
     });
@@ -149,9 +165,13 @@ export function getRedisClient(config: RedisConfig = {}): Redis {
 
     client.on('reconnecting', () => {
         console.log('[Redis] Attempting to reconnect...');
+=======
+    client!.on('connect', () => {
+        console.log('[Redis] Connected successfully');
+>>>>>>> d0c8d4c (fix: TypeScript errors, test failures, and add unit tests)
     });
 
-    return client;
+    return client!;
 }
 
 /**

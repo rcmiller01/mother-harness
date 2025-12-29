@@ -91,6 +91,7 @@ describe('Approval Schema', () => {
     it('validates an approval payload', () => {
         const approval = {
             id: 'approval-1',
+            run_id: 'run-1',
             task_id: 'task-1',
             project_id: 'project-1',
             step_id: 'step-1',

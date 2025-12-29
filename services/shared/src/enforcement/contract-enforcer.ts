@@ -9,7 +9,7 @@ import type { Approval } from '../types/approval.js';
 import { createApproval } from '../types/approval.js';
 import { getRedisJSON } from '../redis/index.js';
 import { RoleRegistry, getRoleRegistry } from '../registry/role-registry.js';
-import { type AgentCapability } from '../types/role.js';
+import type { AgentCapability } from '../types/role.js';
 import { nanoid } from 'nanoid';
 
 /** Result of contract validation */

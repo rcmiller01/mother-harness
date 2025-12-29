@@ -3,8 +3,8 @@
  * FT.CREATE definitions for RediSearch indexes
  */
 
-import { type Redis } from 'ioredis';
 import { getRedisClient } from './client.js';
+import type { Redis } from 'ioredis';
 
 /** Index definitions for RediSearch */
 export const INDEX_DEFINITIONS = {
