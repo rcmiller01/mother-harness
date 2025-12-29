@@ -56,13 +56,8 @@ async function apiRequest<T>(
 ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
 
-    // Use centralized auth headers
-    const { getAuthHeaders } = await import('../auth-headers');
-    const authHeaders = getAuthHeaders();
-
     const defaultHeaders: HeadersInit = {
         'Content-Type': 'application/json',
-        ...authHeaders,
     };
 
     const response = await fetchWithTimeout(url, {

@@ -2,7 +2,7 @@
 
 import './globals.css';
 import React from 'react';
-import { AuthProvider } from '../lib/auth';
+import { IdentityProvider } from '../components/identity/IdentityProvider';
 import { EventStreamProvider } from '../components/providers/EventStreamProvider';
 import { ErrorBoundary } from '../components/providers/ErrorBoundary';
 
@@ -24,14 +24,15 @@ export default function RootLayout({
             </head>
             <body>
                 <ErrorBoundary>
-                    <AuthProvider>
+                    <IdentityProvider>
                         <EventStreamProvider>
                             {children}
                         </EventStreamProvider>
-                    </AuthProvider>
+                    </IdentityProvider>
                 </ErrorBoundary>
             </body>
         </html>
     );
 }
+
 
