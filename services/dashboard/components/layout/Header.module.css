@@ -35,6 +35,7 @@
 }
 
 .projectSelector {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
@@ -58,6 +59,46 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Project dropdown menu */
+.projectMenu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 200px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+}
+
+.projectMenuItem {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.projectMenuItem:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.projectMenuItem:first-child {
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.projectMenuItem:last-child {
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.projectMenuDivider {
+    height: 1px;
+    background: var(--border-primary);
+    margin: var(--spacing-xs) 0;
 }
 
 /* Center section */
@@ -112,6 +153,10 @@
     gap: var(--spacing-sm);
 }
 
+.notificationWrapper {
+    position: relative;
+}
+
 .iconButton {
     position: relative;
     display: flex;
@@ -149,6 +194,109 @@
     justify-content: center;
 }
 
+/* Notification dropdown */
+.notificationDropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 320px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+}
+
+.notificationHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--border-primary);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.notificationClose {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+
+.notificationClose:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.notificationList {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.notificationItem {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition-fast);
+}
+
+.notificationItem:hover {
+    background: var(--bg-hover);
+}
+
+.notificationItem:last-child {
+    border-bottom: none;
+}
+
+.notificationItem.unread {
+    background: rgba(99, 102, 241, 0.05);
+}
+
+.notificationContent {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.notificationMessage {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.notificationTime {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+}
+
+.notifIconWarning {
+    color: var(--status-warning);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.notifIconSuccess {
+    color: var(--status-success);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.notifIconInfo {
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
 .divider {
     width: 1px;
     height: 24px;
@@ -176,13 +324,23 @@
 .avatar {
     width: 32px;
     height: 32px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-primary);
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
     border-radius: var(--radius-full);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-secondary);
+    color: white;
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.userName {
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Responsive */
@@ -192,6 +350,10 @@
     }
 
     .center {
+        display: none;
+    }
+
+    .userName {
         display: none;
     }
 }

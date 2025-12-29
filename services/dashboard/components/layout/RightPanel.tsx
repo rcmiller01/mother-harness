@@ -1,54 +1,82 @@
 /**
  * Right Panel Component
- * Tabbed panel for agents, context, tasks, files, and approvals
+ * Tabbed panel with 5 sections: Agents | Context | Tasks | Files | Approvals
  */
 
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
     Users,
-    FileText,
-    CheckSquare,
+    Brain,
+    ListTodo,
     FolderOpen,
-    ShieldCheck,
-    PanelRightClose,
+    Shield,
 } from 'lucide-react';
-import { useUIStore } from '../../stores/uiStore';
-import { useResizable } from '../../hooks/useResizable';
+import { useAgentStore } from '../../stores/agentStore';
 import { AgentsPanel } from '../panels/AgentsPanel';
 import { ContextPanel } from '../panels/ContextPanel';
 import { TasksPanel } from '../panels/TasksPanel';
 import { FilesPanel } from '../panels/FilesPanel';
 import { ApprovalsPanel } from '../panels/ApprovalsPanel';
-import type { RightPanelTab } from '../../types/ui';
 import styles from './RightPanel.module.css';
 
-interface RightPanelProps {
-    width: number;
+type TabId = 'agents' | 'context' | 'tasks' | 'files' | 'approvals';
+
+interface Tab {
+    id: TabId;
+    label: string;
+    icon: React.ReactNode;
+    badge: number | undefined;
 }
 
-const tabs: Array<{ id: RightPanelTab; label: string; icon: React.ReactNode }> = [
-    { id: 'agents', label: 'Agents', icon: <Users size={16} /> },
-    { id: 'context', label: 'Context', icon: <FileText size={16} /> },
-    { id: 'tasks', label: 'Tasks', icon: <CheckSquare size={16} /> },
-    { id: 'files', label: 'Files', icon: <FolderOpen size={16} /> },
-    { id: 'approvals', label: 'Approvals', icon: <ShieldCheck size={16} /> },
-];
+interface RightPanelProps {
+    width?: number;
+}
 
-export function RightPanel({ width: initialWidth }: RightPanelProps) {
-    const { activeRightTab, setActiveRightTab, setRightPanelWidth, toggleRightPanel } = useUIStore();
+export function RightPanel({ width = 360 }: RightPanelProps) {
+    const [activeTab, setActiveTab] = useState<TabId>('agents');
+    const { getPendingApprovals, getActiveAgentCount, getActiveTasks } = useAgentStore();
 
-    const { width, isResizing, handleMouseDown } = useResizable({
-        initialWidth,
-        minWidth: 280,
-        maxWidth: 500,
-        direction: 'left',
-        onResize: setRightPanelWidth,
-    });
+    const pendingApprovals = getPendingApprovals();
+    const activeAgents = getActiveAgentCount();
+    const activeTasks = getActiveTasks();
+
+    const tabs: Tab[] = [
+        {
+            id: 'agents',
+            label: 'Agents',
+            icon: <Users size={16} />,
+            badge: activeAgents > 0 ? activeAgents : undefined,
+        },
+        {
+            id: 'context',
+            label: 'Context',
+            icon: <Brain size={16} />,
+            badge: undefined,
+        },
+        {
+            id: 'tasks',
+            label: 'Tasks',
+            icon: <ListTodo size={16} />,
+            badge: activeTasks.length > 0 ? activeTasks.length : undefined,
+        },
+        {
+            id: 'files',
+            label: 'Files',
+            icon: <FolderOpen size={16} />,
+            badge: undefined,
+        },
+        {
+            id: 'approvals',
+            label: 'Approvals',
+            icon: <Shield size={16} />,
+            badge: pendingApprovals.length > 0 ? pendingApprovals.length : undefined,
+        },
+    ];
 
     const renderTabContent = () => {
-        switch (activeRightTab) {
+        switch (activeTab) {
             case 'agents':
                 return <AgentsPanel />;
             case 'context':
@@ -65,43 +93,31 @@ export function RightPanel({ width: initialWidth }: RightPanelProps) {
     };
 
     return (
-        <aside className={styles.panel} style={{ width }}>
-            {/* Resize Handle */}
-            <div
-                className={`${styles.resizeHandle} ${isResizing ? styles.resizing : ''}`}
-                onMouseDown={handleMouseDown}
-            />
-
-            <div className={styles.content}>
-                {/* Header with tabs */}
-                <div className={styles.header}>
-                    <div className={styles.tabs}>
-                        {tabs.map((tab) => (
-                            <button
-                                key={tab.id}
-                                className={`${styles.tab} ${activeRightTab === tab.id ? styles.activeTab : ''
-                                    }`}
-                                onClick={() => setActiveRightTab(tab.id)}
-                                title={tab.label}
-                            >
-                                {tab.icon}
-                            </button>
-                        ))}
-                    </div>
+        <div className={styles.panel} style={{ width }}>
+            {/* Tab bar */}
+            <div className={styles.tabBar}>
+                {tabs.map((tab) => (
                     <button
-                        className={styles.collapseButton}
-                        onClick={toggleRightPanel}
-                        aria-label="Collapse panel"
+                        key={tab.id}
+                        className={`${styles.tab} ${activeTab === tab.id ? styles.active : ''}`}
+                        onClick={() => setActiveTab(tab.id)}
+                        title={tab.label}
                     >
-                        <PanelRightClose size={18} />
+                        {tab.icon}
+                        <span className={styles.tabLabel}>{tab.label}</span>
+                        {tab.badge !== undefined && (
+                            <span className={`${styles.badge} ${tab.id === 'approvals' ? styles.badgeWarning : ''}`}>
+                                {tab.badge}
+                            </span>
+                        )}
                     </button>
-                </div>
-
-                {/* Tab Content */}
-                <div className={styles.tabContent}>
-                    {renderTabContent()}
-                </div>
+                ))}
             </div>
-        </aside>
+
+            {/* Tab content */}
+            <div className={styles.content}>
+                {renderTabContent()}
+            </div>
+        </div>
     );
 }
