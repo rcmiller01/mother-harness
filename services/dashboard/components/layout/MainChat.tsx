@@ -16,8 +16,7 @@ import {
     Loader2,
 } from 'lucide-react';
 import { useThreadStore } from '../../stores/threadStore';
-import { UserMessage } from '../messages/UserMessage';
-import { AssistantMessage } from '../messages/AssistantMessage';
+import { MessageList } from '../messages/MessageList';
 import styles from './MainChat.module.css';
 
 export function MainChat() {
@@ -78,13 +77,7 @@ export function MainChat() {
                     </div>
                 ) : (
                     <div className={styles.messageList}>
-                        {messages.map((message) =>
-                            message.role === 'user' ? (
-                                <UserMessage key={message.id} message={message} />
-                            ) : (
-                                <AssistantMessage key={message.id} message={message} />
-                            )
-                        )}
+                        <MessageList messages={messages} />
                         <div ref={messagesEndRef} />
                     </div>
                 )}

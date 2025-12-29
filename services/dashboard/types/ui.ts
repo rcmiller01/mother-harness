@@ -33,18 +33,35 @@ export interface Conversation {
 /** Message for chat display */
 export interface ChatMessage {
     id: string;
-    role: 'user' | 'assistant' | 'system';
+    role: 'user' | 'assistant' | 'system' | 'tool' | 'approval';
     content: string;
     timestamp: string;
     agentType?: AgentType;
     agentName?: string;
-    metadata?: {
-        tokensUsed?: number;
-        durationMs?: number;
-        model?: string;
-    };
+    metadata?: MessageMetadata;
     attachments?: MessageAttachment[];
     isStreaming?: boolean;
+}
+
+/** Extended metadata for different message types */
+export interface MessageMetadata {
+    // Common
+    tokensUsed?: number;
+    durationMs?: number;
+    model?: string;
+    // System messages
+    level?: 'info' | 'success' | 'warning' | 'error';
+    // Tool messages
+    toolName?: string;
+    status?: 'pending' | 'running' | 'completed' | 'error' | 'approved' | 'rejected';
+    args?: Record<string, unknown>;
+    result?: unknown;
+    // Approval messages
+    approvalId?: string;
+    agentName?: string;
+    action?: string;
+    files?: string[];
+    risk?: 'low' | 'medium' | 'high';
 }
 
 /** Message attachment */

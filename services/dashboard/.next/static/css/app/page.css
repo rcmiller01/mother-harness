@@ -814,6 +814,389 @@
         opacity: 1;
     }
 }
+
+/* ========================================
+   System Message Styles
+   ======================================== */
+
+.Message_systemMessage__OCc1K {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--text-muted);
+    animation: Message_fadeIn__mYvUW var(--transition-fast) ease-out;
+}
+
+.Message_systemMessage__OCc1K.Message_info__JGIMO {
+    border-left-color: var(--accent-primary);
+}
+
+.Message_systemMessage__OCc1K.Message_success__F9dHP {
+    border-left-color: var(--status-success);
+}
+
+.Message_systemMessage__OCc1K.Message_warning__0BqOA {
+    border-left-color: var(--status-warning);
+}
+
+.Message_systemMessage__OCc1K.Message_error__6jMPI {
+    border-left-color: var(--status-error);
+}
+
+.Message_systemIcon__z_ZXk {
+    flex-shrink: 0;
+}
+
+.Message_systemContent___QlJe {
+    flex: 1 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.Message_systemText__ODWZD {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.Message_systemTime___RceR {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.Message_iconInfo__mgHzF {
+    color: var(--accent-primary);
+}
+
+.Message_iconSuccess__f7iyM {
+    color: var(--status-success);
+}
+
+.Message_iconWarning__v3Tj1 {
+    color: var(--status-warning);
+}
+
+.Message_iconError__YGapj {
+    color: var(--status-error);
+}
+
+/* ========================================
+   Tool Message Styles
+   ======================================== */
+
+.Message_toolMessage__Do10Q {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    animation: Message_fadeIn__mYvUW var(--transition-fast) ease-out;
+}
+
+.Message_toolMessage__Do10Q.Message_completed___kAiL {
+    border-left: 3px solid var(--status-success);
+}
+
+.Message_toolMessage__Do10Q.Message_error__6jMPI {
+    border-left: 3px solid var(--status-error);
+}
+
+.Message_toolMessage__Do10Q.Message_running__PfFWn {
+    border-left: 3px solid var(--accent-primary);
+}
+
+.Message_toolHeader__Cz8Ir {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-family: inherit;
+    text-align: left;
+    transition: background var(--transition-fast);
+}
+
+.Message_toolHeader__Cz8Ir:hover {
+    background: var(--bg-hover);
+}
+
+.Message_toolInfo__uQpwy {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.Message_toolName__hZIBr {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    font-family: var(--font-mono);
+}
+
+.Message_toolMeta__qKk6h {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.Message_toolDuration__dmlwj {
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
+.Message_toolTime__5bPCN {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.Message_toolDetails__Az__P {
+    padding: 0 var(--spacing-md) var(--spacing-md);
+    border-top: 1px solid var(--border-primary);
+}
+
+.Message_toolSection__W_LT_ {
+    margin-top: var(--spacing-sm);
+}
+
+.Message_toolSectionLabel__u4RDC {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-tertiary);
+    margin-bottom: var(--spacing-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.Message_toolCode__d27ey {
+    margin: 0;
+    padding: var(--spacing-sm);
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* ========================================
+   Approval Message Styles
+   ======================================== */
+
+.Message_approvalMessage__fsFyn {
+    background: var(--bg-secondary);
+    border: 1px solid var(--status-warning);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    animation: Message_fadeIn__mYvUW var(--transition-fast) ease-out;
+}
+
+.Message_approvalMessage__fsFyn.Message_approved__408yK {
+    border-color: var(--status-success);
+}
+
+.Message_approvalMessage__fsFyn.Message_rejected__dveOI {
+    border-color: var(--status-error);
+}
+
+.Message_approvalHeader__nusQJ {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.Message_approvalMessage__fsFyn.Message_approved__408yK .Message_approvalHeader__nusQJ {
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.Message_approvalMessage__fsFyn.Message_rejected__dveOI .Message_approvalHeader__nusQJ {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.Message_approvalTitle__MRAJH {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.Message_approvalIcon__qLSW7 {
+    color: var(--status-warning);
+}
+
+.Message_approvalMessage__fsFyn.Message_approved__408yK .Message_approvalIcon__qLSW7 {
+    color: var(--status-success);
+}
+
+.Message_approvalMessage__fsFyn.Message_rejected__dveOI .Message_approvalIcon__qLSW7 {
+    color: var(--status-error);
+}
+
+.Message_approvalTime__dGEYQ {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.Message_riskBadge__0Fw2H {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    border-radius: var(--radius-full);
+    text-transform: capitalize;
+}
+
+.Message_riskLow__cHH0u {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--status-success);
+}
+
+.Message_riskMedium__WriDP {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--status-warning);
+}
+
+.Message_riskHigh__odHpj {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--status-error);
+}
+
+.Message_approvalBody__PA8lf {
+    padding: var(--spacing-md);
+}
+
+.Message_approvalDescription__mo3CB {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+}
+
+.Message_approvalReason__umpLy {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.Message_approvalFiles__0yZGc {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs);
+    margin-left: calc(-1 * var(--spacing-xs));
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    cursor: pointer;
+    transition: color var(--transition-fast);
+}
+
+.Message_approvalFiles__0yZGc:hover {
+    color: var(--text-primary);
+}
+
+.Message_fileList__uLSS2 {
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.Message_fileItem__nN3I4 {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) 0;
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.Message_approvalActions__PiYVG {
+    display: flex;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border-top: 1px solid var(--border-primary);
+}
+
+.Message_approvalButton__e1g7G {
+    flex: 1 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.Message_approvalButton__e1g7G.Message_approve__vgWpe {
+    background: var(--status-success);
+    color: white;
+}
+
+.Message_approvalButton__e1g7G.Message_approve__vgWpe:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.Message_approvalButton__e1g7G.Message_reject__v9TOs {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-primary);
+}
+
+.Message_approvalButton__e1g7G.Message_reject__v9TOs:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--status-error);
+    border-color: var(--status-error);
+}
+
+.Message_approvalButton__e1g7G:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.Message_approvalStatus__vctba {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm);
+    border-top: 1px solid var(--border-primary);
+    font-size: var(--text-sm);
+    font-weight: 500;
+}
+
+.Message_approvalStatus__vctba.Message_approved__408yK {
+    color: var(--status-success);
+}
+
+.Message_approvalStatus__vctba.Message_rejected__dveOI {
+    color: var(--status-error);
+}
 /*!*************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************!*\
   !*** css ../../node_modules/.pnpm/next@14.2.35_react-dom@18.3.1_react@18.3.1/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[7].use[2]!../../node_modules/.pnpm/next@14.2.35_react-dom@18.3.1_react@18.3.1/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[7].use[3]!./components/messages/AgentBadge.module.css ***!
   \*************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************/
@@ -876,6 +1259,24 @@
         opacity: 0.5;
         transform: scale(0.8);
     }
+}
+/*!**************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ../../node_modules/.pnpm/next@14.2.35_react-dom@18.3.1_react@18.3.1/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[7].use[2]!../../node_modules/.pnpm/next@14.2.35_react-dom@18.3.1_react@18.3.1/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[7].use[3]!./components/messages/MessageList.module.css ***!
+  \**************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************/
+/* Message List Styles */
+
+.MessageList_list__tQhjZ {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-lg);
+}
+
+.MessageList_list__tQhjZ:empty::before {
+    content: 'No messages yet. Start a conversation!';
+    text-align: center;
+    color: var(--text-muted);
+    padding: var(--spacing-xl);
 }
 /*!*********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************!*\
   !*** css ../../node_modules/.pnpm/next@14.2.35_react-dom@18.3.1_react@18.3.1/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[7].use[2]!../../node_modules/.pnpm/next@14.2.35_react-dom@18.3.1_react@18.3.1/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[7].use[3]!./components/layout/MainChat.module.css ***!
