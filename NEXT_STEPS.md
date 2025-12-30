@@ -13,10 +13,12 @@
 pnpm --filter @mother-harness/shared build
 pnpm --filter @mother-harness/agents build
 pnpm --filter @mother-harness/orchestrator build
+pnpm --filter @mother-harness/dashboard build
 ```
 
 ### 2. Run Full Test Suite
 ```bash
+# Runs Vitest in non-watch mode across all packages
 pnpm -r test -- --run
 ```
 
@@ -27,7 +29,8 @@ pnpm -r test -- --run
 
 ### 3. Start Docker Stack
 ```bash
-docker-compose up -d
+# Docker Compose v2+ syntax (use 'docker-compose' for v1)
+docker compose up -d
 ```
 
 Verify all services start:
@@ -38,7 +41,7 @@ Verify all services start:
 
 ---
 
-## 🟡 TypeScript Technical Debt (13 Errors)
+## 🟡 TypeScript Technical Debt (13 Occurrences across 9 Files)
 
 All errors are `exactOptionalPropertyTypes` violations. Fix by adding `| undefined` to optional property types:
 
@@ -103,7 +106,7 @@ curl -X POST http://localhost:3000/api/runs \
 
 ### Security
 - [ ] Run `pnpm audit` for vulnerabilities
-- [ ] Verify no secrets in codebase: `git log -p | grep -i "password\|secret\|key" | head -50`
+- [ ] Scan for secrets: `npx secretlint "**/*"` or review with `git secrets --scan`
 - [ ] Check `.env.example` has no real values
 - [ ] Verify Redis AUTH is configured for production
 

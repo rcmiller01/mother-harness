@@ -3,6 +3,8 @@
  * Core interfaces for the Mission Control plugin system
  */
 
+import type { ReactNode } from 'react';
+
 /** Plugin metadata */
 export interface PluginManifest {
     id: string;
@@ -113,7 +115,7 @@ export interface PanelRegistration {
     id: string;
     title: string;
     icon: string;  // Lucide icon name
-    render: () => HTMLElement | React.ReactNode;
+    render: () => HTMLElement | ReactNode;
     badge?: () => number | undefined;
 }
 
@@ -130,7 +132,7 @@ export interface CommandRegistration {
 /** Status item registration */
 export interface StatusItemRegistration {
     id: string;
-    render: () => HTMLElement | React.ReactNode;
+    render: () => HTMLElement | ReactNode;
     position?: 'left' | 'right';
     priority?: number;
 }

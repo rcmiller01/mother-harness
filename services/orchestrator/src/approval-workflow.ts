@@ -39,11 +39,7 @@ export const RISK_LEVELS: Record<RiskLevel, { description: string; auto_approve:
         auto_approve: false,
     },
     high: {
-        description: 'Data modifications, deployments, external integrations',
-        auto_approve: false,
-    },
-    critical: {
-        description: 'Deletions, security changes, production operations',
+        description: 'Data modifications, deployments, external integrations, deletions, security changes',
         auto_approve: false,
     },
 };
@@ -62,28 +58,28 @@ export const APPROVAL_CATEGORIES = {
         required_role: 'developer',
         timeout_hours: 24,
     },
-    
+
     // API call approvals
     external_api: {
         description: 'Calling external APIs',
         required_role: 'admin',
         timeout_hours: 4,
     },
-    
+
     // Data modification approvals
     data_modification: {
         description: 'Modifying or deleting data',
         required_role: 'admin',
         timeout_hours: 2,
     },
-    
+
     // Deployment approvals
     deployment: {
         description: 'Deploying changes to infrastructure',
         required_role: 'admin',
         timeout_hours: 8,
     },
-    
+
     // Cost approvals
     budget_override: {
         description: 'Exceeding budget limits',
@@ -113,24 +109,24 @@ export const APPROVAL_CATEGORIES = {
 export function assessStepRisk(step: TodoItem, query: string): RiskLevel {
     const lowerQuery = query.toLowerCase();
     const lowerDesc = step.description.toLowerCase();
-    
-    // Critical risk indicators
+
+    // Critical/High risk indicators
     const criticalKeywords = ['delete', 'remove', 'drop', 'destroy', 'purge', 'production'];
     if (criticalKeywords.some(kw => lowerQuery.includes(kw) || lowerDesc.includes(kw))) {
-        return 'critical';
+        return 'high';
     }
-    
+
     // High risk indicators
     const highKeywords = ['deploy', 'publish', 'create', 'update', 'modify', 'write'];
     if (highKeywords.some(kw => lowerQuery.includes(kw) || lowerDesc.includes(kw))) {
         return 'high';
     }
-    
+
     // Medium risk for code generation
     if (step.agent === 'coder') {
         return 'medium';
     }
-    
+
     // Default to low
     return 'low';
 }
@@ -147,25 +143,25 @@ export function requiresApproval(
     if (step.require_approval !== undefined) {
         return step.require_approval;
     }
-    
+
     // Check risk level
     const risk = step.risk ?? 'low';
     const config = RISK_LEVELS[risk];
-    
-    // Never auto-approve high or critical
-    if (risk === 'high' || risk === 'critical') {
+
+    // Never auto-approve high
+    if (risk === 'high') {
         return true;
     }
-    
+
     // Check user preferences for medium/low
     if (risk === 'medium' && userPreferences?.auto_approve_medium) {
         return false;
     }
-    
+
     if (risk === 'low' && userPreferences?.auto_approve_low === false) {
         return true;
     }
-    
+
     return config ? !config.auto_approve : true;
 }
 
@@ -185,7 +181,7 @@ export interface ApprovalPreview {
 export function createApprovalPreview(step: TodoItem, task: Task): ApprovalPreview {
     const risk = step.risk ?? 'low';
     const approvalType = step.approval_type ?? 'general';
-    
+
     return {
         step_id: step.id,
         agent: step.agent,
@@ -200,7 +196,7 @@ export function createApprovalPreview(step: TodoItem, task: Task): ApprovalPrevi
 function generateImpactSummary(step: TodoItem, _task: Task): string {
     const agent = step.agent;
     const risk = step.risk ?? 'low';
-    
+
     switch (agent) {
         case 'coder':
             return `Will generate and potentially execute code. Risk: ${risk}`;
@@ -304,13 +300,13 @@ function isRollbackAvailable(step: TodoItem): boolean {
 export const SECURITY_GUIDELINES = {
     // Minimum wait time before auto-rejection
     min_approval_timeout_minutes: 5,
-    
+
     // Maximum pending approvals per user
     max_pending_approvals: 10,
-    
+
     // Required approval fields
     required_approval_fields: ['user_id', 'timestamp', 'decision', 'notes'],
-    
+
     // Approval authorization matrix
     authorization_matrix: {
         code_execution: ['developer', 'admin'],

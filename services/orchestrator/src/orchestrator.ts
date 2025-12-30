@@ -138,7 +138,6 @@ export class Orchestrator {
     private tier3 = new Tier3Memory();
     private enforcer = getContractEnforcer();
     private registry = getRoleRegistry();
-<<<<<<< HEAD
     private budgetGuard = getResourceBudgetGuard();
     private costTracker = getCostTracker();
 
@@ -147,10 +146,6 @@ export class Orchestrator {
             ? result.model_used
             : undefined;
     }
-=======
-    private budgetGuard: ResourceBudgetGuard = getResourceBudgetGuard();
-    private n8nAdapter = new N8nAdapter();
->>>>>>> d0c8d4c (fix: TypeScript errors, test failures, and add unit tests)
 
     /**
      * Create a run with a new task
@@ -770,11 +765,7 @@ export class Orchestrator {
         }
 
         // Execute the agent directly
-<<<<<<< HEAD
         const directExecutor = agentExecutors.get(step.agent) ?? getLocalAgentExecutor(step.agent);
-=======
-        const executor = agentExecutors.get(step.agent) ?? getLocalAgentExecutor(step.agent);
->>>>>>> d0c8d4c (fix: TypeScript errors, test failures, and add unit tests)
         const startTime = Date.now();
         const result = await directExecutor(step.description, context);
         result.duration_ms = Date.now() - startTime;

@@ -30,7 +30,7 @@ services:
       dockerfile: ./services/orchestrator/Dockerfile
     container_name: mother-orchestrator
     ports:
-      - "8002:8002"
+      - "8002:8000"
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-stack:6379
