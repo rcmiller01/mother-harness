@@ -531,6 +531,18 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 // Note: Must be registered via fastify.register() for @fastify/websocket to pass WebSocket as first param
 app.register(async function (fastify) {
     fastify.get('/ws', { websocket: true }, (socket: any, request: any) => {
+        // Debug: what is socket actually?
+        app.log.info({
+            socketType: typeof socket,
+            socketKeys: socket ? Object.keys(socket).slice(0, 20) : [],
+            socketHasOn: typeof socket?.on,
+            socketHasSend: typeof socket?.send,
+            socketHasSocket: !!socket?.socket,
+            socketSocketKeys: socket?.socket ? Object.keys(socket.socket).slice(0, 20) : [],
+            socketSocketHasOn: typeof socket?.socket?.on,
+            socketSocketHasSend: typeof socket?.socket?.send,
+        }, 'socket param debug info');
+
         // socket is now the actual WebSocket from the ws library (per @fastify/websocket docs)
         const url = new URL(request?.url || '', 'http://localhost');
         const taskId = url.searchParams.get('task_id');
