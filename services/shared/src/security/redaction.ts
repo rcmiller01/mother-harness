@@ -3,21 +3,26 @@
  */
 
 const PII_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+    // Email addresses
     {
         pattern: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
         replacement: '[REDACTED_EMAIL]',
     },
-    {
-        pattern: /\b(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/g,
-        replacement: '[REDACTED_PHONE]',
-    },
+    // SSN - must be checked before phone to avoid conflicts
     {
         pattern: /\b\d{3}-\d{2}-\d{4}\b/g,
         replacement: '[REDACTED_SSN]',
     },
+    // Credit card numbers - 13-16 digits with optional spaces/dashes
     {
         pattern: /\b(?:\d[ -]*?){13,16}\b/g,
         replacement: '[REDACTED_CARD]',
+    },
+    // Phone numbers - various formats including international
+    // Matches: (555) 123-4567, 555-123-4567, +1 555 123 4567, +44 20 7946 0958, etc.
+    {
+        pattern: /(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}(?:[\s.-]?\d{1,4})?/g,
+        replacement: '[REDACTED_PHONE]',
     },
 ];
 

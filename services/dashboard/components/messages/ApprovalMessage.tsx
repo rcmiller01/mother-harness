@@ -57,9 +57,9 @@ export function ApprovalMessage({ message }: ApprovalMessageProps) {
     const getRiskBadge = () => {
         if (!risk) return null;
         const riskStyles: Record<string, string> = {
-            low: styles.riskLow,
-            medium: styles.riskMedium,
-            high: styles.riskHigh,
+            low: styles.riskLow ?? '',
+            medium: styles.riskMedium ?? '',
+            high: styles.riskHigh ?? '',
         };
         return (
             <span className={`${styles.riskBadge} ${riskStyles[risk] || ''}`}>
