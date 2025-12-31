@@ -137,6 +137,7 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://192.168.50.219:8002
       - NEXT_PUBLIC_WS_URL=ws://192.168.50.219:8002
+      - ORCHESTRATOR_URL=http://mother-orchestrator:8000
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-stack:6379
       - REDIS_USERNAME=default
       - REDIS_PASSWORD=${REDIS_PASSWORD}
