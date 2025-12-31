@@ -530,38 +530,38 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 // WebSocket endpoint for real-time task updates
 // Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
 app.get('/ws', { websocket: true }, (connection, request) => {
-    // connection is a SocketStream, connection.socket is the actual WebSocket
-    const ws = connection.socket;
+    // In @fastify/websocket v8, connection is a SocketStream (Duplex stream wrapping WebSocket)
+    // For sending, we can use connection.send() or write JSON strings
     const url = new URL(request.url, 'http://localhost');
     const taskId = url.searchParams.get('task_id');
     const userId = (request as any).user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
     app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
-    ws.on('message', (message: any) => {
+    connection.on('data', (message: Buffer) => {
         try {
             const data = JSON.parse(message.toString());
             app.log.debug({ data }, 'WebSocket message received');
 
             // Handle ping/pong for keepalive
             if (data.type === 'ping') {
-                ws.send(JSON.stringify({ type: 'pong' }));
+                connection.write(JSON.stringify({ type: 'pong' }));
             }
         } catch (error) {
             app.log.error(error, 'Failed to parse WebSocket message');
         }
     });
 
-    ws.on('close', () => {
+    connection.on('close', () => {
         app.log.info({ task_id: taskId }, 'WebSocket connection closed');
     });
 
-    ws.on('error', (error: Error) => {
+    connection.on('error', (error: Error) => {
         app.log.error({ error, task_id: taskId }, 'WebSocket error');
     });
 
     // Send initial connection confirmation
-    ws.send(JSON.stringify({
+    connection.write(JSON.stringify({
         type: 'connected',
         task_id: taskId
     }));
