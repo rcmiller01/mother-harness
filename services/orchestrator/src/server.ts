@@ -143,6 +143,47 @@ async function registerPlugins() {
     });
 
     await app.register(websocket);
+
+    // WebSocket endpoint - MUST be registered here after websocket plugin
+    // so that @fastify/websocket provides the WebSocket as first param
+    app.register(async function (fastify) {
+        fastify.get('/ws', { websocket: true }, (socket: any, request: any) => {
+            const url = new URL(request?.url || '', 'http://localhost');
+            const taskId = url.searchParams.get('task_id');
+            const userId = request?.user?.user_id || url.searchParams.get('user_id') || 'anonymous';
+
+            app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
+
+            socket.on('message', (message: Buffer | string) => {
+                try {
+                    const data = JSON.parse(message.toString());
+                    app.log.debug({ data }, 'WebSocket message received');
+
+                    // Handle ping/pong for keepalive
+                    if (data.type === 'ping') {
+                        socket.send(JSON.stringify({ type: 'pong' }));
+                    }
+                } catch (error) {
+                    app.log.error(error, 'Failed to parse WebSocket message');
+                }
+            });
+
+            socket.on('close', () => {
+                app.log.info({ task_id: taskId }, 'WebSocket connection closed');
+            });
+
+            socket.on('error', (error: Error) => {
+                app.log.error({ error, task_id: taskId }, 'WebSocket error');
+            });
+
+            // Send initial connection confirmation
+            socket.send(JSON.stringify({
+                type: 'connected',
+                task_id: taskId
+            }));
+        });
+    });
+
     await registerAuth(app as any);
 }
 
@@ -527,78 +568,6 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
     }
 });
 
-// WebSocket endpoint for real-time task updates
-// Note: Must be registered via fastify.register() for @fastify/websocket to pass WebSocket as first param
-app.register(async function (fastify) {
-    fastify.get('/ws', { websocket: true }, (socket: any, request: any) => {
-        // Debug: what is socket actually?
-        app.log.info({
-            socketType: typeof socket,
-            socketKeys: socket ? Object.keys(socket).slice(0, 20) : [],
-            socketHasOn: typeof socket?.on,
-            socketHasSend: typeof socket?.send,
-            socketHasSocket: !!socket?.socket,
-            socketSocketKeys: socket?.socket ? Object.keys(socket.socket).slice(0, 20) : [],
-            socketSocketHasOn: typeof socket?.socket?.on,
-            socketSocketHasSend: typeof socket?.socket?.send,
-        }, 'socket param debug info');
-
-        // Debug: what is socket.ws specifically?
-        app.log.info({
-            socketWsType: typeof socket?.ws,
-            socketWsKeys: (socket?.ws && typeof socket.ws === 'object') ? Object.keys(socket.ws).slice(0, 20) : [],
-            socketWsHasOn: typeof socket?.ws?.on,
-            socketWsHasSend: typeof socket?.ws?.send,
-            // Also check socket.ws.socket (the SocketStream pattern)
-            socketWsSocketKeys: socket?.ws?.socket ? Object.keys(socket.ws.socket).slice(0, 20) : [],
-            socketWsSocketHasOn: typeof socket?.ws?.socket?.on,
-            socketWsSocketHasSend: typeof socket?.ws?.socket?.send,
-        }, 'socket.ws debug info');
-
-        // Try using socket.ws (SocketStream) or socket.ws.socket (underlying WebSocket)
-        const ws = socket?.ws?.socket || socket?.ws;
-
-        const url = new URL(request?.url || '', 'http://localhost');
-        const taskId = url.searchParams.get('task_id');
-        const userId = request?.user?.user_id || url.searchParams.get('user_id') || 'anonymous';
-
-        app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
-
-        // Check if ws has the methods we need
-        if (typeof ws?.on !== 'function' || typeof ws?.send !== 'function') {
-            app.log.error({ hasOn: typeof ws?.on, hasSend: typeof ws?.send }, 'WebSocket methods not found');
-            return;
-        }
-
-        ws.on('message', (message: Buffer | string) => {
-            try {
-                const data = JSON.parse(message.toString());
-                app.log.debug({ data }, 'WebSocket message received');
-
-                // Handle ping/pong for keepalive
-                if (data.type === 'ping') {
-                    socket.send(JSON.stringify({ type: 'pong' }));
-                }
-            } catch (error) {
-                app.log.error(error, 'Failed to parse WebSocket message');
-            }
-        });
-
-        socket.on('close', () => {
-            app.log.info({ task_id: taskId }, 'WebSocket connection closed');
-        });
-
-        socket.on('error', (error: Error) => {
-            app.log.error({ error, task_id: taskId }, 'WebSocket error');
-        });
-
-        // Send initial connection confirmation
-        socket.send(JSON.stringify({
-            type: 'connected',
-            task_id: taskId
-        }));
-    });
-});
 
 app.addHook('onResponse', async (request, reply) => {
     if (request.url === '/health' || request.url.startsWith('/ws')) {
