@@ -543,14 +543,34 @@ app.register(async function (fastify) {
             socketSocketHasSend: typeof socket?.socket?.send,
         }, 'socket param debug info');
 
-        // socket is now the actual WebSocket from the ws library (per @fastify/websocket docs)
+        // Debug: what is socket.ws specifically?
+        app.log.info({
+            socketWsType: typeof socket?.ws,
+            socketWsKeys: (socket?.ws && typeof socket.ws === 'object') ? Object.keys(socket.ws).slice(0, 20) : [],
+            socketWsHasOn: typeof socket?.ws?.on,
+            socketWsHasSend: typeof socket?.ws?.send,
+            // Also check socket.ws.socket (the SocketStream pattern)
+            socketWsSocketKeys: socket?.ws?.socket ? Object.keys(socket.ws.socket).slice(0, 20) : [],
+            socketWsSocketHasOn: typeof socket?.ws?.socket?.on,
+            socketWsSocketHasSend: typeof socket?.ws?.socket?.send,
+        }, 'socket.ws debug info');
+
+        // Try using socket.ws (SocketStream) or socket.ws.socket (underlying WebSocket)
+        const ws = socket?.ws?.socket || socket?.ws;
+
         const url = new URL(request?.url || '', 'http://localhost');
         const taskId = url.searchParams.get('task_id');
         const userId = request?.user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
         app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
-        socket.on('message', (message: Buffer | string) => {
+        // Check if ws has the methods we need
+        if (typeof ws?.on !== 'function' || typeof ws?.send !== 'function') {
+            app.log.error({ hasOn: typeof ws?.on, hasSend: typeof ws?.send }, 'WebSocket methods not found');
+            return;
+        }
+
+        ws.on('message', (message: Buffer | string) => {
             try {
                 const data = JSON.parse(message.toString());
                 app.log.debug({ data }, 'WebSocket message received');
