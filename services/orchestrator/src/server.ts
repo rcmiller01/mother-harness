@@ -529,27 +529,59 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 
 // WebSocket endpoint for real-time task updates
 // Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
-app.get('/ws', { websocket: true }, (connection: any, request) => {
-    // Debug: check connection.raw for actual WebSocket
-    app.log.info({
-        rawType: typeof connection.raw,
-        rawKeys: connection.raw ? Object.keys(connection.raw).slice(0, 20) : [],
-        rawSocketType: typeof connection.raw?.socket,
-        rawSocketKeys: connection.raw?.socket ? Object.keys(connection.raw.socket).slice(0, 20) : [],
-        rawUpgrade: !!connection.raw?.upgrade,
-        reqWsType: typeof request?.ws,
-        reqRawType: typeof request?.raw,
-    }, 'connection.raw debug info');
+// In @fastify/websocket, the handler signature is (socket: WebSocket, request: FastifyRequest)
+// We need to handle both the Request-like object we're receiving AND access the socket
+app.get('/ws', { websocket: true }, (socket: any, request: any) => {
+    // The first parameter might be wrapped - check if it has raw.socket or is the socket itself
+    // Based on debug: socket has .raw, .id, .params, etc. (it's Request-like)
+    // The actual WebSocket upgrade happens but we need to get the ws connection
 
-    const url = new URL(request?.url || connection.url, 'http://localhost');
+    // Try to get WebSocket from various locations
+    const ws = socket.socket || socket.raw?.socket || socket;
+
+    const url = new URL(request?.url || socket.url, 'http://localhost');
     const taskId = url.searchParams.get('task_id');
-    const userId = (request as any)?.user?.user_id || (connection as any)?.user?.user_id || url.searchParams.get('user_id') || 'anonymous';
+    const userId = request?.user?.user_id || socket?.user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
     app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
-    // For now, just log that we can't find the WebSocket API
-    // and return early to avoid crashing
-    app.log.warn('WebSocket API investigation in progress - skipping message handlers');
+    // Check if we found a valid WebSocket with proper methods
+    if (typeof ws?.on !== 'function' || typeof ws?.send !== 'function') {
+        app.log.error({
+            hasOn: typeof ws?.on,
+            hasSend: typeof ws?.send,
+            wsType: typeof ws
+        }, 'WebSocket methods not found');
+        return;
+    }
+
+    ws.on('message', (message: Buffer | string) => {
+        try {
+            const data = JSON.parse(message.toString());
+            app.log.debug({ data }, 'WebSocket message received');
+
+            // Handle ping/pong for keepalive
+            if (data.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }));
+            }
+        } catch (error) {
+            app.log.error(error, 'Failed to parse WebSocket message');
+        }
+    });
+
+    ws.on('close', () => {
+        app.log.info({ task_id: taskId }, 'WebSocket connection closed');
+    });
+
+    ws.on('error', (error: Error) => {
+        app.log.error({ error, task_id: taskId }, 'WebSocket error');
+    });
+
+    // Send initial connection confirmation
+    ws.send(JSON.stringify({
+        type: 'connected',
+        task_id: taskId
+    }));
 });
 
 app.addHook('onResponse', async (request, reply) => {
