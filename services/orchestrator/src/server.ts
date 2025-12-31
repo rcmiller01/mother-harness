@@ -530,37 +530,38 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 // WebSocket endpoint for real-time task updates
 // Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
 app.get('/ws', { websocket: true }, (connection, request) => {
-    const { socket } = connection;
+    // connection is a SocketStream, connection.socket is the actual WebSocket
+    const ws = connection.socket;
     const url = new URL(request.url, 'http://localhost');
     const taskId = url.searchParams.get('task_id');
     const userId = (request as any).user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
     app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
-    socket.on('message', (message: any) => {
+    ws.on('message', (message: any) => {
         try {
             const data = JSON.parse(message.toString());
             app.log.debug({ data }, 'WebSocket message received');
 
             // Handle ping/pong for keepalive
             if (data.type === 'ping') {
-                socket.send(JSON.stringify({ type: 'pong' }));
+                ws.send(JSON.stringify({ type: 'pong' }));
             }
         } catch (error) {
             app.log.error(error, 'Failed to parse WebSocket message');
         }
     });
 
-    socket.on('close', () => {
+    ws.on('close', () => {
         app.log.info({ task_id: taskId }, 'WebSocket connection closed');
     });
 
-    socket.on('error', (error: Error) => {
+    ws.on('error', (error: Error) => {
         app.log.error({ error, task_id: taskId }, 'WebSocket error');
     });
 
     // Send initial connection confirmation
-    socket.send(JSON.stringify({
+    ws.send(JSON.stringify({
         type: 'connected',
         task_id: taskId
     }));
