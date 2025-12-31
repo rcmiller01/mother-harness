@@ -34,7 +34,12 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.json ./
 COPY services/shared/src ./services/shared/src
 COPY services/dashboard/app ./services/dashboard/app
+COPY services/dashboard/components ./services/dashboard/components
 COPY services/dashboard/lib ./services/dashboard/lib
+COPY services/dashboard/stores ./services/dashboard/stores
+COPY services/dashboard/types ./services/dashboard/types
+COPY services/dashboard/hooks ./services/dashboard/hooks
+COPY services/dashboard/plugins ./services/dashboard/plugins
 COPY services/dashboard/next.config.js ./services/dashboard/
 COPY services/dashboard/next-env.d.ts ./services/dashboard/
 
