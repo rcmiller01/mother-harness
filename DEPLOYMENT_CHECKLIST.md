@@ -23,6 +23,9 @@
 ### 5. Code Fixes
 - ✅ Added React import to dashboard layout
 - ✅ All exports verified from shared package
+- ✅ Fixed TypeScript CSS module type error in ApprovalMessage component
+- ✅ Fixed phone number PII redaction regex (all 27 tests passing)
+- ✅ Reordered PII patterns to prevent false matches
 
 ## 📋 Pre-Deployment Checklist
 
@@ -63,36 +66,45 @@ Before deploying, ensure `.env` file contains:
 
 ## 🚀 Deployment Steps
 
-1. **Copy environment file**
+1. **Pull latest changes from git** (REQUIRED before building)
    ```bash
-   cp env.example .env
-   # Edit .env with your values
+   cd /path/to/mother-harness
+   git pull origin master
    ```
 
-2. **Ensure Redis Stack is accessible**
+2. **Copy environment file** (if not already configured)
+   ```bash
+   cp env.example .env
+   # Edit .env with your production values
+   ```
+
+3. **Ensure Redis Stack is accessible**
    - Default: `redis://:password@redis-stack:6379`
    - Update REDIS_URL if using external Redis
 
-3. **Configure Redis ACL users**
+4. **Configure Redis ACL users**
    - Rotate the default ACL passwords in `.env`
    - Apply ACL config via `redis-cli` (example):
      ```bash
      ACL SETUSER orchestrator on >${REDIS_ACL_ORCHESTRATOR_PASSWORD} +get +set +del +keys +json.* +ft.* +xadd +xread +xreadgroup +xack +hget +hset +hgetall +hincrby +hincrbyfloat +expire +exists +ping ~task:* ~project:* ~approval:* ~model_decision:* ~cost:* ~budget:* ~retry:*
      ```
 
-4. **Start services**
+5. **Build and start services**
    ```bash
+   docker-compose build
    docker-compose up -d
    ```
 
-5. **Verify health**
+6. **Verify health**
    ```bash
-   curl http://localhost:8000/health
+   curl http://localhost:8002/health  # Orchestrator (note: port 8002)
+   curl http://localhost:3000         # Dashboard
    ```
 
-6. **Check logs**
+7. **Check logs**
    ```bash
    docker-compose logs -f orchestrator
+   docker-compose logs -f dashboard
    ```
 
 ## ⚠️ Known Limitations
