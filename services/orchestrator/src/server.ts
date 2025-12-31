@@ -530,54 +530,26 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 // WebSocket endpoint for real-time task updates
 // Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
 app.get('/ws', { websocket: true }, (connection: any, request) => {
-    // Debug: log what connection.ws actually is
+    // Debug: check connection.raw for actual WebSocket
     app.log.info({
-        wsType: typeof connection.ws,
-        wsKeys: connection.ws ? Object.keys(connection.ws) : [],
-        wsHasOn: typeof connection.ws?.on,
-        wsHasSend: typeof connection.ws?.send,
-        wsHasSocket: !!connection.ws?.socket,
-        wsSocketKeys: connection.ws?.socket ? Object.keys(connection.ws.socket) : [],
-        wsSocketHasOn: typeof connection.ws?.socket?.on,
-        wsSocketHasSend: typeof connection.ws?.socket?.send,
-    }, 'connection.ws debug info');
+        rawType: typeof connection.raw,
+        rawKeys: connection.raw ? Object.keys(connection.raw).slice(0, 20) : [],
+        rawSocketType: typeof connection.raw?.socket,
+        rawSocketKeys: connection.raw?.socket ? Object.keys(connection.raw.socket).slice(0, 20) : [],
+        rawUpgrade: !!connection.raw?.upgrade,
+        reqWsType: typeof request?.ws,
+        reqRawType: typeof request?.raw,
+    }, 'connection.raw debug info');
 
-    // Try ws.socket if ws itself doesn't work
-    const ws = connection.ws?.socket || connection.ws;
-    const url = new URL(request.url, 'http://localhost');
+    const url = new URL(request?.url || connection.url, 'http://localhost');
     const taskId = url.searchParams.get('task_id');
-    const userId = (request as any).user?.user_id || url.searchParams.get('user_id') || 'anonymous';
+    const userId = (request as any)?.user?.user_id || (connection as any)?.user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
     app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
-    // Use the WebSocket methods
-    ws.on('message', (message: Buffer | string) => {
-        try {
-            const data = JSON.parse(message.toString());
-            app.log.debug({ data }, 'WebSocket message received');
-
-            // Handle ping/pong for keepalive
-            if (data.type === 'ping') {
-                ws.send(JSON.stringify({ type: 'pong' }));
-            }
-        } catch (error) {
-            app.log.error(error, 'Failed to parse WebSocket message');
-        }
-    });
-
-    ws.on('close', () => {
-        app.log.info({ task_id: taskId }, 'WebSocket connection closed');
-    });
-
-    ws.on('error', (error: Error) => {
-        app.log.error({ error, task_id: taskId }, 'WebSocket error');
-    });
-
-    // Send initial connection confirmation
-    ws.send(JSON.stringify({
-        type: 'connected',
-        task_id: taskId
-    }));
+    // For now, just log that we can't find the WebSocket API
+    // and return early to avoid crashing
+    app.log.warn('WebSocket API investigation in progress - skipping message handlers');
 });
 
 app.addHook('onResponse', async (request, reply) => {
