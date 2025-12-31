@@ -110,7 +110,7 @@ export function getRedisClient(config: RedisConfig = {}): Redis {
 
     options.maxRetriesPerRequest = 3;
     options.connectTimeout = 10000;
-    options.commandTimeout = 5000;
+    options.commandTimeout = 10000; // Must be > XREADGROUP BLOCK time (5000ms)
     options.enableReadyCheck = true;
     options.lazyConnect = false;
 
