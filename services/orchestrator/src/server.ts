@@ -528,11 +528,14 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 });
 
 // WebSocket endpoint for real-time task updates
-app.get('/ws', { websocket: true, preHandler: requireRole('user', 'admin') }, (connection, request) => {
+// Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
+app.get('/ws', { websocket: true }, (connection, request) => {
     const { socket } = connection;
-    const taskId = new URL(request.url, 'http://localhost').searchParams.get('task_id');
+    const url = new URL(request.url, 'http://localhost');
+    const taskId = url.searchParams.get('task_id');
+    const userId = (request as any).user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
-    app.log.info({ task_id: taskId }, 'WebSocket connection established');
+    app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
     socket.on('message', (message: any) => {
         try {

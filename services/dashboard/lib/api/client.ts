@@ -60,6 +60,22 @@ async function apiRequest<T>(
         'Content-Type': 'application/json',
     };
 
+    // Get user_id from identity store for simplified auth (browser only)
+    if (typeof window !== 'undefined') {
+        try {
+            const identityData = localStorage.getItem('mother-harness-identity');
+            if (identityData) {
+                const parsed = JSON.parse(identityData);
+                const userId = parsed?.state?.identity?.id;
+                if (userId) {
+                    (defaultHeaders as Record<string, string>)['X-User-ID'] = userId;
+                }
+            }
+        } catch (e) {
+            console.warn('[API] Failed to get identity from localStorage:', e);
+        }
+    }
+
     const response = await fetchWithTimeout(url, {
         ...options,
         headers: {

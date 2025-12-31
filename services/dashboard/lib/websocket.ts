@@ -73,14 +73,34 @@ class WebSocketConnection {
         if (typeof window === 'undefined') return;
 
         this.taskId = taskId || null;
-        const url = taskId ? `${WS_URL}/ws?task_id=${taskId}` : `${WS_URL}/ws`;
 
-        // Add auth token if available
+        // Get user_id from identity store (persisted in localStorage)
+        let userId: string | null = null;
+        try {
+            const identityData = localStorage.getItem('mother-harness-identity');
+            if (identityData) {
+                const parsed = JSON.parse(identityData);
+                userId = parsed?.state?.identity?.id || null;
+            }
+        } catch (e) {
+            console.warn('[WS] Failed to get identity from localStorage:', e);
+        }
+
+        // Build URL with user_id for simplified auth
+        let url = `${WS_URL}/ws`;
+        const params = new URLSearchParams();
+        if (taskId) params.set('task_id', taskId);
+        if (userId) params.set('user_id', userId);
+
+        // Also try legacy token if available
         const token = localStorage.getItem('auth_token');
-        const urlWithAuth = token ? `${url}&token=${token}` : url;
+        if (token) params.set('token', token);
+
+        const queryString = params.toString();
+        const urlWithParams = queryString ? `${url}?${queryString}` : url;
 
         try {
-            this.ws = new WebSocket(urlWithAuth);
+            this.ws = new WebSocket(urlWithParams);
 
             this.ws.onopen = () => {
                 console.log('[WS] Connected');

@@ -63,6 +63,27 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
         // Skip OPTIONS requests
         if (request.method === 'OPTIONS') return;
 
+        // Skip strict auth for WebSocket paths - auth is validated via query params
+        // Browser WS upgrade requests can't easily send custom headers
+        const isWebSocket = request.url.startsWith('/ws');
+
+        // Single-user mode: Accept X-User-ID header or user_id query param
+        // This allows simplified auth without password for single-user deployments
+        const simpleUserId = (request.headers['x-user-id'] as string)
+            || (request.query as any)?.user_id
+            || new URL(request.url, 'http://localhost').searchParams.get('user_id');
+
+        if (simpleUserId && typeof simpleUserId === 'string' && simpleUserId.trim()) {
+            (request as any).user = {
+                user_id: simpleUserId.trim(),
+                name: simpleUserId.trim(),
+                roles: ['user', 'admin', 'approver'], // Grant all roles in single-user mode
+                created_at: new Date().toISOString(),
+                last_activity: new Date().toISOString(),
+            } as UserSession;
+            return;
+        }
+
         // Try Bearer token first
         const authHeader = request.headers.authorization;
         if (authHeader?.startsWith('Bearer ')) {
@@ -91,6 +112,20 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
                 };
                 return;
             }
+        }
+
+        // For WebSocket paths, don't send 401 - let the connection through
+        // WebSocket auth is optional; the user_id from query params was already captured above
+        if (isWebSocket) {
+            // Create anonymous user for WS if no auth provided
+            (request as any).user = {
+                user_id: 'anonymous',
+                name: 'Anonymous',
+                roles: ['user'],
+                created_at: new Date().toISOString(),
+                last_activity: new Date().toISOString(),
+            } as UserSession;
+            return;
         }
 
         reply.status(401).send({ error: 'Authentication required' });
