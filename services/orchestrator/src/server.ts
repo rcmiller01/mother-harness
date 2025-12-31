@@ -530,8 +530,20 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 // WebSocket endpoint for real-time task updates
 // Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
 app.get('/ws', { websocket: true }, (connection: any, request) => {
-    // In @fastify/websocket v8, connection is a SocketStream, access the raw WebSocket via .socket
-    const socket = connection.socket;
+    // Debug: log what connection actually is
+    app.log.info({
+        connectionType: typeof connection,
+        connectionKeys: Object.keys(connection || {}),
+        hasSocket: !!connection?.socket,
+        socketType: typeof connection?.socket,
+        socketKeys: connection?.socket ? Object.keys(connection.socket) : [],
+        hasSend: typeof connection?.send,
+        hasWrite: typeof connection?.write,
+        socketHasSend: typeof connection?.socket?.send,
+    }, 'WebSocket connection debug info');
+
+    // Try different access patterns
+    const socket = connection.socket || connection;
     const url = new URL(request.url, 'http://localhost');
     const taskId = url.searchParams.get('task_id');
     const userId = (request as any).user?.user_id || url.searchParams.get('user_id') || 'anonymous';
