@@ -161,7 +161,7 @@ async function registerPlugins() {
 
                     // Handle ping/pong for keepalive
                     if (data.type === 'ping') {
-                        socket.send(JSON.stringify({ type: 'pong' }));
+                        socket.socket.send(JSON.stringify({ type: 'pong' }));
                     }
                 } catch (error) {
                     app.log.error(error, 'Failed to parse WebSocket message');
@@ -177,7 +177,7 @@ async function registerPlugins() {
             });
 
             // Send initial connection confirmation
-            socket.send(JSON.stringify({
+            socket.socket.send(JSON.stringify({
                 type: 'connected',
                 task_id: taskId
             }));
