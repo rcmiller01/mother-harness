@@ -530,51 +530,40 @@ app.get('/api/metrics/summary', { preHandler: requireRole('user', 'admin') }, as
 // WebSocket endpoint for real-time task updates
 // Note: Auth is handled by onRequest hook which accepts X-User-ID header or user_id query param
 app.get('/ws', { websocket: true }, (connection: any, request) => {
-    // Debug: log what connection actually is
-    app.log.info({
-        connectionType: typeof connection,
-        connectionKeys: Object.keys(connection || {}),
-        hasSocket: !!connection?.socket,
-        socketType: typeof connection?.socket,
-        socketKeys: connection?.socket ? Object.keys(connection.socket) : [],
-        hasSend: typeof connection?.send,
-        hasWrite: typeof connection?.write,
-        socketHasSend: typeof connection?.socket?.send,
-    }, 'WebSocket connection debug info');
-
-    // Try different access patterns
-    const socket = connection.socket || connection;
+    // In @fastify/websocket, when { websocket: true }, the first param is the Fastify Request
+    // The actual WebSocket is at connection.ws (or we can use request.ws interchangeably)
+    const ws = connection.ws;
     const url = new URL(request.url, 'http://localhost');
     const taskId = url.searchParams.get('task_id');
     const userId = (request as any).user?.user_id || url.searchParams.get('user_id') || 'anonymous';
 
     app.log.info({ task_id: taskId, user_id: userId }, 'WebSocket connection established');
 
-    // Use the underlying WebSocket's methods
-    socket.on('message', (message: Buffer | string) => {
+    // Use the WebSocket methods
+    ws.on('message', (message: Buffer | string) => {
         try {
             const data = JSON.parse(message.toString());
             app.log.debug({ data }, 'WebSocket message received');
 
             // Handle ping/pong for keepalive
             if (data.type === 'ping') {
-                socket.send(JSON.stringify({ type: 'pong' }));
+                ws.send(JSON.stringify({ type: 'pong' }));
             }
         } catch (error) {
             app.log.error(error, 'Failed to parse WebSocket message');
         }
     });
 
-    socket.on('close', () => {
+    ws.on('close', () => {
         app.log.info({ task_id: taskId }, 'WebSocket connection closed');
     });
 
-    socket.on('error', (error: Error) => {
+    ws.on('error', (error: Error) => {
         app.log.error({ error, task_id: taskId }, 'WebSocket error');
     });
 
     // Send initial connection confirmation
-    socket.send(JSON.stringify({
+    ws.send(JSON.stringify({
         type: 'connected',
         task_id: taskId
     }));
